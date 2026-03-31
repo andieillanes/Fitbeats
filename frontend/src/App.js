@@ -141,18 +141,43 @@ function SpotifyProvider({ children }) {
     document.body.appendChild(script);
   }, [spotifyToken]);
 
+  // Transfer playback to our Web SDK device
+  const transferPlayback = async (deviceId, token) => {
+    try {
+      console.log('[FitBeats] Transferring playback to device:', deviceId);
+      const resp = await fetch('https://api.spotify.com/v1/me/player', {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_ids: [deviceId], play: false })
+      });
+      if (resp.ok || resp.status === 204) {
+        console.log('[FitBeats] Playback transferred successfully');
+        return true;
+      }
+      const errText = await resp.text();
+      console.warn('[FitBeats] Transfer response:', resp.status, errText);
+      return false;
+    } catch (e) {
+      console.error('[FitBeats] Transfer exception:', e);
+      return false;
+    }
+  };
+
   // Initialize player when SDK ready
   useEffect(() => {
     if (!sdkReady || !spotifyToken || spotifyPlayer) return;
     console.log('[FitBeats] Initializing Spotify Player...');
+    const tokenRef = spotifyToken;
     const player = new window.Spotify.Player({
       name: 'FitBeats Player',
-      getOAuthToken: cb => cb(spotifyToken),
+      getOAuthToken: cb => cb(tokenRef),
       volume: 0.8
     });
-    player.addListener('ready', ({ device_id }) => {
+    player.addListener('ready', async ({ device_id }) => {
       console.log('[FitBeats] Spotify Player ready, device:', device_id);
       setSpotifyDeviceId(device_id);
+      // Critical: Transfer playback to this device so audio routes here
+      await transferPlayback(device_id, tokenRef);
     });
     player.addListener('not_ready', () => {
       console.log('[FitBeats] Spotify Player not ready');
@@ -166,8 +191,8 @@ function SpotifyProvider({ children }) {
       }
     });
     player.addListener('initialization_error', ({ message }) => console.error('[FitBeats] Spotify init error:', message));
-    player.addListener('authentication_error', ({ message }) => console.error('[FitBeats] Spotify auth error:', message));
-    player.addListener('account_error', ({ message }) => console.error('[FitBeats] Spotify account error:', message));
+    player.addListener('authentication_error', ({ message }) => console.error('[FitBeats] Spotify auth error (Premium required):', message));
+    player.addListener('account_error', ({ message }) => console.error('[FitBeats] Spotify account error (Premium required):', message));
     player.connect().then(ok => console.log('[FitBeats] Spotify connect:', ok));
     setSpotifyPlayer(player);
     return () => { player.disconnect(); };
@@ -199,6 +224,10 @@ function SpotifyProvider({ children }) {
     }
     try {
       console.log('[FitBeats] Playing track:', uri, 'on device:', spotifyDeviceId);
+      // Ensure our device is the active playback device before playing
+      await transferPlayback(spotifyDeviceId, spotifyToken);
+      // Small delay to let Spotify activate the device
+      await new Promise(resolve => setTimeout(resolve, 300));
       const resp = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${spotifyToken}`, 'Content-Type': 'application/json' },
@@ -207,6 +236,21 @@ function SpotifyProvider({ children }) {
       if (!resp.ok) {
         const err = await resp.text();
         console.error('[FitBeats] Spotify play error:', resp.status, err);
+        // If 404 (no active device), try transfer + play in one step
+        if (resp.status === 404) {
+          console.log('[FitBeats] Retrying with transfer+play...');
+          await transferPlayback(spotifyDeviceId, spotifyToken);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const retry = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${spotifyToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uris: [uri] })
+          });
+          if (retry.ok || retry.status === 204) {
+            setSpotifyIsPlaying(true);
+            return true;
+          }
+        }
         return false;
       }
       setSpotifyIsPlaying(true);
@@ -242,7 +286,7 @@ function SpotifyProvider({ children }) {
     <SpotifyContext.Provider value={{
       spotifyToken, spotifyConnected, spotifyDeviceId, spotifyPlayer,
       spotifyPosition, spotifyDuration, spotifyIsPlaying,
-      playSpotifyTrack, pauseSpotify, resumeSpotify, seekSpotify, checkConnection
+      playSpotifyTrack, pauseSpotify, resumeSpotify, seekSpotify, checkConnection, transferPlayback
     }}>
       {children}
     </SpotifyContext.Provider>

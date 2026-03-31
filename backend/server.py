@@ -1364,6 +1364,32 @@ async def spotify_disconnect(request: Request):
     )
     return {"disconnected": True}
 
+@api_router.put("/spotify/transfer")
+async def spotify_transfer_playback(request: Request):
+    """Transfer Spotify playback to a specific device (server-side fallback)"""
+    user = await get_current_user(request)
+    body = await request.json()
+    device_id = body.get("device_id")
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+    
+    # Get fresh token
+    token_resp = await get_spotify_user_token(request)
+    if not token_resp.get("connected") or not token_resp.get("access_token"):
+        raise HTTPException(status_code=401, detail="Spotify not connected")
+    
+    token = token_resp["access_token"]
+    resp = requests.put(
+        f"{SPOTIFY_API_BASE}/me/player",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"device_ids": [device_id], "play": False},
+        timeout=10
+    )
+    if resp.status_code in (200, 204):
+        return {"transferred": True}
+    logger.warning(f"Spotify transfer failed: {resp.status_code} {resp.text}")
+    raise HTTPException(status_code=resp.status_code, detail=f"Transfer failed: {resp.text}")
+
 # ==================== PLAYLIST ITEMS (MIXED) ====================
 class PlaylistItemAdd(BaseModel):
     type: str  # "mix" or "spotify"
