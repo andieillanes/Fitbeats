@@ -272,7 +272,7 @@ export default function SearchView() {
                 {spotifyTracks.map((track) => (
                   <div
                     key={track.spotify_id}
-                    className="flex items-center gap-4 p-3 rounded-md hover:bg-white/10 cursor-pointer group"
+                    className="flex items-center gap-3 p-3 rounded-md hover:bg-white/10 cursor-pointer group"
                     onClick={() => playSpotifyTrack(track)}
                     data-testid={`search-spotify-${track.spotify_id}`}
                   >
@@ -292,9 +292,9 @@ export default function SearchView() {
                       <p className="font-medium text-white truncate">{track.name}</p>
                       <p className="text-sm text-[#B3B3B3] truncate">{track.artist}</p>
                     </div>
-                    <div className="text-sm text-[#B3B3B3] truncate max-w-[150px]">{track.album}</div>
-                    <div className="text-sm text-[#B3B3B3]">{formatDuration(track.duration_ms)}</div>
-                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100">
+                    <div className="hidden sm:block text-sm text-[#B3B3B3] truncate max-w-[150px]">{track.album}</div>
+                    <div className="text-sm text-[#B3B3B3] flex-shrink-0">{formatDuration(track.duration_ms)}</div>
+                    <div className="hidden sm:flex items-center gap-2 opacity-0 group-hover:opacity-100">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button className="text-[#B3B3B3] hover:text-white" onClick={e => e.stopPropagation()}>

@@ -49,6 +49,7 @@ export default function MainLayout() {
   const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
   const [spotifyPlaying, setSpotifyPlaying] = useState(false);
+  const [spotifyEmbedId, setSpotifyEmbedId] = useState(null);
   const lastTrackRef = React.useRef(null);
 
   const isSpotifyTrack = currentMix?.type === 'spotify';
@@ -91,7 +92,10 @@ export default function MainLayout() {
     if (trackId === lastId && !currentMix) return;
     lastTrackRef.current = trackId;
 
-    if (!currentMix) return;
+    if (!currentMix) {
+      setSpotifyEmbedId(null);
+      return;
+    }
 
     if (isSpotifyTrack) {
       // Pause HTML5 audio
@@ -99,29 +103,30 @@ export default function MainLayout() {
         audioRef.current.pause();
         audioRef.current.src = '';
       }
-      // Try SDK first, then preview_url
+      
+      // Try SDK first (Premium users)
       if (spotify?.spotifyDeviceId && currentMix.uri) {
         spotify.playSpotifyTrack(currentMix.uri).then(ok => {
-          if (!ok && currentMix.preview_url) {
-            audioRef.current.src = currentMix.preview_url;
-            audioRef.current.play().catch(() => {});
+          if (ok) {
+            setSpotifyPlaying(true);
+            setSpotifyEmbedId(null);
+          } else {
+            // Fallback to embed player
+            setSpotifyPlaying(false);
+            setSpotifyEmbedId(currentMix.spotify_id);
           }
-          setSpotifyPlaying(ok);
         });
-      } else if (currentMix.preview_url) {
-        if (audioRef.current) {
-          audioRef.current.src = currentMix.preview_url;
-          audioRef.current.play().catch(() => setIsPlaying(false));
-        }
+      } else {
+        // No SDK - use embed player
         setSpotifyPlaying(false);
-      } else if (currentMix.external_url) {
-        setSpotifyPlaying(false);
+        setSpotifyEmbedId(currentMix.spotify_id);
       }
       if (currentMix.duration_ms) setDuration(currentMix.duration_ms / 1000);
     } else {
-      // Local mix - pause Spotify and START the audio
+      // Local mix - stop Spotify
       if (spotify?.spotifyPlayer) spotify.pauseSpotify();
       setSpotifyPlaying(false);
+      setSpotifyEmbedId(null);
       
       if (audioRef.current && currentMix.mix_id) {
         // Try offline cache first, then network
@@ -134,7 +139,7 @@ export default function MainLayout() {
             audioRef.current.src = `${API}/mixes/${currentMix.mix_id}/audio`;
           }
           if (isPlaying) {
-            audioRef.current.play().catch(() => setIsPlaying(false));
+            audioRef.current.play().catch(() => {});
           }
         });
       }
@@ -435,6 +440,51 @@ export default function MainLayout() {
           }}
           onEnded={playNext}
         />
+
+        {/* Spotify Embed Player (visible, for playback without Premium SDK) */}
+        {spotifyEmbedId && (
+          <div className="fixed bottom-[80px] left-0 right-0 z-50 flex justify-center px-4 pb-2" data-testid="spotify-embed-container">
+            <div className="w-full max-w-[480px] rounded-xl overflow-hidden shadow-2xl shadow-black/60 bg-[#181818] border border-[#282828]">
+              <div className="flex items-center gap-3 p-4">
+                <div className="w-14 h-14 rounded bg-[#282828] overflow-hidden flex-shrink-0">
+                  {currentMix?.album_image ? (
+                    <img src={currentMix.album_image} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center"><SpotifyLogo size={24} className="text-[#1DB954]" /></div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-white truncate">{currentMix?.name}</p>
+                  <p className="text-xs text-[#B3B3B3] truncate">{currentMix?.artist}</p>
+                  <p className="text-[10px] text-[#6A6A6A] mt-1">
+                    <a href="/profile" className="text-[#1DB954] hover:underline">Conecta Spotify Premium</a> para reproducir dentro de FitBeats
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {currentMix?.uri && (
+                    <a
+                      href={`https://open.spotify.com/track/${spotifyEmbedId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1DB954] text-black font-bold text-sm hover:bg-[#1ed760] transition-colors"
+                      data-testid="open-in-spotify-btn"
+                    >
+                      <SpotifyLogo size={18} weight="fill" />
+                      Abrir
+                    </a>
+                  )}
+                  <button 
+                    onClick={() => { setSpotifyEmbedId(null); setIsPlaying(false); }} 
+                    className="text-[#B3B3B3] hover:text-white"
+                    data-testid="close-spotify-embed"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Now Playing */}
         <div className="flex items-center gap-3 w-[30%] min-w-[120px] md:min-w-[180px]">
