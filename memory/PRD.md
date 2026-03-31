@@ -16,28 +16,33 @@ Plataforma de música tipo Spotify para estudios de fitness. Admin sube mixes, i
 
 ### Audio Performance
 - [x] Caché en disco backend, POST /api/mixes/preload, Cache-Control 24h
-- [x] Frontend reproduce inmediatamente desde red, IndexedDB check en paralelo
-- [x] Precarga automática de siguientes 2 tracks
+- [x] Frontend reproduce inmediatamente desde red, IndexedDB check en paralelo, precarga
 
 ### Spotify Integration
 - [x] Búsqueda con tabs, playlists mixtas, Web Playback SDK con transfer playback
-- [x] **Importar playlists de Spotify**: GET /api/spotify/playlists + POST /api/spotify/playlists/{id}/import
-- [x] OAuth scopes incluyen playlist-read-private, playlist-read-collaborative
-- [x] HomeView muestra grid de playlists Spotify con botón de importar (1-click)
+- [x] Importar playlists de Spotify: GET /api/spotify/playlists + POST /api/spotify/playlists/{id}/import
+- [x] OAuth scopes: playlist-read-private, playlist-read-collaborative
+- [x] HomeView con grid de playlists Spotify importables (1-click)
 - [x] Banner "Conecta tu Spotify" cuando no está conectado
+- [x] Iframe embed real de Spotify como fallback cuando SDK no disponible
+- [x] URI se construye desde spotify_id si falta
 
 ### Reproductor / Player Bar
 - [x] Progress bar con rAF, getValidDuration(), seek, CSS custom
 
-### Modo Clase
-- [x] Renombrado inline, CRUD sesiones
-- [x] Progress bar sincronizada con audio real (rAF leyendo audioRef.current.currentTime)
-- [x] Transiciones corregidas: advancingRef previene doble-avance, uri propagado en todos los playMix
-- [x] Crossfade (fade out → switch → fade in), Fade Out, Fade In, Cut con duración configurable
-- [x] Spotify tracks en clase: uri se pasa correctamente, MainLayout detecta tipo y usa SDK
+### Playlists
+- [x] PlaylistResponse modelo flexible con campos opcionales
+- [x] Playlists importadas de Spotify se pueden abrir y ver en detalle
+- [x] Backwards compatibility: user_name, mix_ids, items rellenados automáticamente
+- [x] Playlists compartibles, descarga offline
 
-### Playlists, Offline, Perfil, UI
-- [x] Playlists compartibles, caché offline IndexedDB, perfil editable, responsive
+### Modo Clase
+- [x] Renombrado inline, advancingRef anti-doble-avance
+- [x] Progress bar sincronizada, transiciones Crossfade/Fade Out/Fade In/Cut
+- [x] URI propagado en todos los playMix para Spotify tracks
+
+### Perfil, UI
+- [x] Edición nombre, conectar/desconectar Spotify, responsive
 
 ## Spotify Setup Required
 Redirect URI en Spotify Developer Dashboard:
