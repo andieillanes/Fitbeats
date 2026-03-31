@@ -95,12 +95,14 @@ export default function CatalogPage() {
   }, [search, selectedGenre, selectedAlbum, bpmRange, mixes]);
 
   const formatDuration = (seconds) => {
+    if (!seconds) return '--:--';
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const getBpmClass = (bpm) => {
+    if (!bpm) return '';
     if (bpm < 100) return 'bpm-low';
     if (bpm < 140) return 'bpm-medium';
     return 'bpm-high';
@@ -345,14 +347,18 @@ export default function CatalogPage() {
 
                   {/* Genre */}
                   <div className="hidden md:block">
-                    <span className="text-sm text-[#A1A1AA]">{mix.genre}</span>
+                    <span className="text-sm text-[#A1A1AA]">{mix.genre || '-'}</span>
                   </div>
 
                   {/* BPM */}
                   <div className="hidden md:flex justify-center">
-                    <span className={`genre-tag ${getBpmClass(mix.bpm)}`}>
-                      {mix.bpm}
-                    </span>
+                    {mix.bpm ? (
+                      <span className={`genre-tag ${getBpmClass(mix.bpm)}`}>
+                        {mix.bpm}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-[#71717A]">-</span>
+                    )}
                   </div>
 
                   {/* Duration */}

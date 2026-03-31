@@ -16,6 +16,10 @@ import bcrypt
 import jwt
 import requests
 import io
+import tempfile
+from mutagen import File as MutagenFile
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -85,6 +89,59 @@ def get_object(path: str) -> tuple:
     )
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+# ==================== AUDIO METADATA EXTRACTION ====================
+def extract_audio_metadata(audio_content: bytes, filename: str) -> dict:
+    """Extract duration, BPM, and genre from audio file"""
+    metadata = {
+        "duration": None,
+        "bpm": None,
+        "genre": None
+    }
+    
+    try:
+        # Write to temp file for mutagen to read
+        suffix = "." + filename.split(".")[-1] if "." in filename else ".mp3"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(audio_content)
+            tmp_path = tmp.name
+        
+        try:
+            audio = MutagenFile(tmp_path)
+            if audio is not None:
+                # Get duration
+                if hasattr(audio, 'info') and hasattr(audio.info, 'length'):
+                    metadata["duration"] = int(audio.info.length)
+                
+                # Try to get genre from tags
+                if hasattr(audio, 'tags') and audio.tags:
+                    # ID3 tags (MP3)
+                    if hasattr(audio.tags, 'getall'):
+                        genres = audio.tags.getall('TCON')
+                        if genres:
+                            metadata["genre"] = str(genres[0])
+                        # Try to get BPM
+                        bpms = audio.tags.getall('TBPM')
+                        if bpms:
+                            try:
+                                metadata["bpm"] = int(str(bpms[0]))
+                            except:
+                                pass
+                    # Other formats (FLAC, OGG, etc.)
+                    elif isinstance(audio.tags, dict):
+                        if 'genre' in audio.tags:
+                            metadata["genre"] = str(audio.tags['genre'][0])
+                        if 'bpm' in audio.tags:
+                            try:
+                                metadata["bpm"] = int(str(audio.tags['bpm'][0]))
+                            except:
+                                pass
+        finally:
+            os.unlink(tmp_path)
+    except Exception as e:
+        logger.warning(f"Error extracting audio metadata: {e}")
+    
+    return metadata
 
 # ==================== PASSWORD FUNCTIONS ====================
 def hash_password(password: str) -> str:
@@ -200,19 +257,19 @@ class AlbumResponse(BaseModel):
 class MixCreate(BaseModel):
     name: str
     artist: str
-    bpm: int
-    duration: int  # in seconds
-    genre: str
     album_id: str
+    bpm: Optional[int] = None
+    duration: Optional[int] = None  # in seconds - auto-detected
+    genre: Optional[str] = None  # auto-detected from metadata
     description: Optional[str] = None
 
 class MixResponse(BaseModel):
     mix_id: str
     name: str
     artist: str
-    bpm: int
-    duration: int
-    genre: str
+    bpm: Optional[int] = None
+    duration: Optional[int] = None
+    genre: Optional[str] = None
     album_id: str
     album_name: Optional[str] = None
     description: Optional[str] = None
@@ -560,10 +617,10 @@ async def create_mix(
     request: Request,
     name: str = Query(...),
     artist: str = Query(...),
-    bpm: int = Query(...),
-    duration: int = Query(...),
-    genre: str = Query(...),
     album_id: str = Query(...),
+    bpm: Optional[int] = Query(None),
+    duration: Optional[int] = Query(None),
+    genre: Optional[str] = Query(None),
     description: Optional[str] = Query(None),
     audio: UploadFile = File(...),
     cover: Optional[UploadFile] = File(None)
@@ -577,8 +634,18 @@ async def create_mix(
     
     mix_id = f"mix_{uuid.uuid4().hex[:12]}"
     
-    # Upload audio file
+    # Read audio file
     audio_content = await audio.read()
+    
+    # Extract metadata from audio file
+    metadata = extract_audio_metadata(audio_content, audio.filename)
+    
+    # Use detected values if not provided
+    final_duration = duration if duration else metadata.get("duration")
+    final_bpm = bpm if bpm else metadata.get("bpm")
+    final_genre = genre if genre else metadata.get("genre")
+    
+    # Upload audio file
     audio_ext = audio.filename.split(".")[-1] if "." in audio.filename else "mp3"
     audio_path = f"{APP_NAME}/mixes/{mix_id}/audio.{audio_ext}"
     put_object(audio_path, audio_content, audio.content_type or "audio/mpeg")
@@ -595,9 +662,9 @@ async def create_mix(
         "mix_id": mix_id,
         "name": name,
         "artist": artist,
-        "bpm": bpm,
-        "duration": duration,
-        "genre": genre,
+        "bpm": final_bpm,
+        "duration": final_duration,
+        "genre": final_genre,
         "album_id": album_id,
         "description": description,
         "audio_path": audio_path,

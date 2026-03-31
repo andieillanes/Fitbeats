@@ -182,8 +182,8 @@ export default function AdminPage() {
       return;
     }
 
-    if (!uploadForm.name || !uploadForm.artist || !uploadForm.bpm || !uploadForm.duration || !uploadForm.genre || !uploadForm.album_id) {
-      toast.error('Completa todos los campos requeridos (incluyendo álbum)');
+    if (!uploadForm.name || !uploadForm.artist || !uploadForm.album_id) {
+      toast.error('Completa nombre, artista y álbum');
       return;
     }
 
@@ -198,10 +198,10 @@ export default function AdminPage() {
       const queryParams = new URLSearchParams({
         name: uploadForm.name,
         artist: uploadForm.artist,
-        bpm: uploadForm.bpm,
-        duration: uploadForm.duration,
-        genre: uploadForm.genre,
         album_id: uploadForm.album_id,
+        ...(uploadForm.bpm && { bpm: uploadForm.bpm }),
+        ...(uploadForm.duration && { duration: uploadForm.duration }),
+        ...(uploadForm.genre && { genre: uploadForm.genre }),
         ...(uploadForm.description && { description: uploadForm.description })
       });
 
@@ -835,33 +835,33 @@ export default function AdminPage() {
                 </div>
                 <div>
                   <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    BPM *
+                    BPM <span className="text-[#71717A] normal-case">(auto-detectado)</span>
                   </label>
                   <Input
                     type="number"
                     value={uploadForm.bpm}
                     onChange={(e) => setUploadForm({ ...uploadForm, bpm: e.target.value })}
-                    placeholder="120"
+                    placeholder="Se detecta del audio"
                     className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
                     data-testid="mix-bpm-input"
                   />
                 </div>
                 <div>
                   <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Duración (seg) *
+                    Duración <span className="text-[#71717A] normal-case">(auto-detectada)</span>
                   </label>
                   <Input
                     type="number"
                     value={uploadForm.duration}
                     onChange={(e) => setUploadForm({ ...uploadForm, duration: e.target.value })}
-                    placeholder="180"
+                    placeholder="Se detecta del audio"
                     className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
                     data-testid="mix-duration-input"
                   />
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Género *
+                    Género <span className="text-[#71717A] normal-case">(auto-detectado si está en metadatos)</span>
                   </label>
                   <Input
                     value={uploadForm.genre}
