@@ -5,13 +5,13 @@ Plataforma de música tipo Spotify enfocada en estudios de fitness ("FitBeats").
 
 ## User Personas
 - **Admin**: Sube mixes de audio, gestiona álbumes, estudios e instructores
-- **Instructor**: Crea playlists mezclando mixes locales + canciones de Spotify, reproduce música durante clases
+- **Instructor**: Crea playlists y sesiones de clase, reproduce música durante sesiones de fitness
 - **Studio**: Administra instructores asociados
 
 ## Stack Tecnológico
 - **Backend**: FastAPI + MongoDB (Motor)
-- **Frontend**: React + Tailwind CSS + Shadcn/UI
-- **Audio**: Mutagen (metadata), Object Storage (archivos), HTTP Range Requests (streaming)
+- **Frontend**: React + Tailwind CSS + Shadcn/UI + Phosphor Icons
+- **Audio**: Mutagen (metadata), Object Storage, HTTP Range Requests (streaming)
 - **Auth**: JWT + Google OAuth (Emergent)
 - **Spotify**: Client Credentials (búsqueda) + Authorization Code (SDK playback)
 
@@ -19,7 +19,7 @@ Plataforma de música tipo Spotify enfocada en estudios de fitness ("FitBeats").
 ```
 /app/
 ├── backend/
-│   ├── server.py (1500+ lines - all endpoints)
+│   ├── server.py (all endpoints)
 │   ├── requirements.txt
 │   └── .env (MONGO_URL, JWT_SECRET, SPOTIFY_CLIENT_ID/SECRET, EMERGENT_LLM_KEY)
 ├── frontend/
@@ -30,14 +30,20 @@ Plataforma de música tipo Spotify enfocada en estudios de fitness ("FitBeats").
 │   │   │   ├── AdminPage.js (admin dashboard)
 │   │   │   ├── SharedPlaylistPage.js (public playlist view - no auth)
 │   │   │   ├── SpotifyCallbackPage.js (Spotify OAuth return)
-│   │   │   └── views/ (AlbumsView, SongsView, SearchView, PlaylistsView, PlaylistDetailView)
+│   │   │   └── views/
+│   │   │       ├── AlbumsView.js, AlbumDetailView.js
+│   │   │       ├── SongsView.js (mobile-responsive flex layout)
+│   │   │       ├── PlaylistsView.js, PlaylistDetailView.js (add songs dialog)
+│   │   │       ├── SearchView.js (Spotify search tabs)
+│   │   │       ├── ProfileView.js (Spotify connect, edit name)
+│   │   │       └── ClassModeView.js (class session editor/player)
 │   │   └── components/ui/ (Shadcn components)
 │   └── .env (REACT_APP_BACKEND_URL)
 ```
 
-## Lo que se ha implementado
+## Implementado
 
-### Core (Completado)
+### Core
 - [x] Setup FastAPI + MongoDB + React
 - [x] Autenticación JWT con roles (admin, instructor)
 - [x] Google OAuth vía Emergent Auth
@@ -48,62 +54,60 @@ Plataforma de música tipo Spotify enfocada en estudios de fitness ("FitBeats").
 - [x] CRUD Studios e Instructores
 - [x] Panel de administración completo
 
-### Spotify Integration (Completado - 31 Mar 2026)
-- [x] Búsqueda de canciones en Spotify (Client Credentials flow - sin login de Spotify)
+### Spotify Integration (31 Mar 2026)
+- [x] Búsqueda de canciones en Spotify (Client Credentials flow)
 - [x] Tabs de búsqueda: Todo / Mixes / Spotify
-- [x] Resultados con carátula de álbum, nombre, artista, álbum, duración
-- [x] Agregar tracks de Spotify a playlists (modelo de items mixtos)
-- [x] Reproductor unificado: mixes locales + tracks Spotify (preview_url + SDK Premium)
-- [x] Spotify OAuth connect para Web Playback SDK (Premium users)
-- [x] Cola de reproducción soporta ambos tipos de tracks
-- [x] Indicadores visuales de Spotify (logo verde) en búsqueda, playlist y reproductor
+- [x] Agregar tracks de Spotify a playlists
+- [x] Reproductor unificado: mixes locales + tracks Spotify (preview + SDK Premium)
+- [x] Spotify OAuth connect para Web Playback SDK
+- [x] Cola de reproducción soporta ambos tipos
 
-### Playlists Compartibles (Completado - 31 Mar 2026)
+### Playlists Compartibles (31 Mar 2026)
 - [x] Endpoint público `/api/public/playlists/{id}` sin autenticación
-- [x] Página `/shared/{playlist_id}` con vista atractiva de la playlist
-- [x] Muestra tracks de Spotify y mixes locales con íconos apropiados
-- [x] CTA de registro para usuarios no autenticados
-- [x] Botón de compartir copia URL `/shared/{id}`
+- [x] Página `/shared/{playlist_id}` con CTA de registro
 
-### Descarga Offline (Completado - 31 Mar 2026)
-- [x] Descarga individual de mixes (`/api/mixes/{id}/download`)
+### Descarga Offline (31 Mar 2026)
 - [x] Descarga de playlist completa como ZIP (`/api/playlists/{id}/download`)
-- [x] Solo mixes locales (tracks de Spotify excluidos por licencia)
-- [x] Botón de descarga en vista de playlist
 
-### UI/UX (Completado)
-- [x] Diseño estilo Spotify (layout 3 columnas, reproductor persistente)
-- [x] Diseño responsive: sidebar colapsable a 1200px, oculta a 768px
-- [x] Navegación inferior en móvil
-- [x] Scrollbar personalizado estilo Spotify
-- [x] Animaciones de hover en álbums y tracks
+### Página de Perfil (31 Mar 2026)
+- [x] Edición de nombre
+- [x] Botón conectar/desconectar Spotify
+- [x] Información de cuenta y rol
+- [x] Cerrar sesión
 
-## Key API Endpoints
-- `POST /api/auth/login` - Login
-- `GET /api/spotify/search?q=...` - Buscar en Spotify
-- `POST /api/playlists/{id}/items` - Agregar item (mix o spotify) a playlist
-- `GET /api/playlists/{id}/items` - Obtener items enriquecidos
-- `DELETE /api/playlists/{id}/items/{index}` - Eliminar item
-- `GET /api/playlists/{id}/download` - Descargar playlist como ZIP
-- `GET /api/public/playlists/{id}` - Playlist pública sin auth
-- `GET /api/mixes/{id}/audio` - Stream de audio con Range requests
+### Modo Clase (31 Mar 2026)
+- [x] Crear sesiones de clase con secuencia de canciones
+- [x] Duración personalizada por canción (en segundos)
+- [x] Tipo de transición por canción (crossfade, corte, fade out, fade in)
+- [x] Duración de transición configurable
+- [x] Reproductor de clase con auto-avance, start/stop/skip
+- [x] Barra de progreso por track
+- [x] Agregar mixes locales y canciones de Spotify
+
+### Correcciones UI/UX (31 Mar 2026)
+- [x] Vista móvil de canciones: layout flex responsivo (antes grid cortaba nombres)
+- [x] Agregar canciones directamente desde la vista de playlist (dialog con búsqueda)
+- [x] Acceso de instructores al catálogo verificado
 
 ## DB Schema
 - `users`: user_id, email, password_hash, name, role, studio_id, spotify_access_token, spotify_refresh_token
 - `albums`: album_id, name, artist, year, cover_path, is_active
 - `mixes`: mix_id, name, artist, bpm, duration, genre, album_id, audio_path, cover_path, is_active
 - `playlists`: playlist_id, name, description, is_public, user_id, user_name, mix_ids, items[], created_at
+- `class_sessions`: session_id, name, user_id, tracks[{type, mix_id/spotify_id, name, artist, custom_duration, transition}], transition_duration
 - `studios`: studio_id, name, address, phone, is_active
 
 ## Backlog Priorizado
 
 ### P2 - Futuro
-- [ ] Gestión de cuentas Premium de Spotify por instructor (flujo para conectar Spotify Premium individual)
+- [ ] Gestión de cuentas Premium de Spotify por instructor
 - [ ] Estadísticas de uso por instructor/studio
-- [ ] Notificaciones de nuevos mixes
 - [ ] Reordenamiento drag-and-drop de items en playlists
 - [ ] Playlists colaborativas entre instructores
+- [ ] Notificaciones de nuevos mixes
+- [ ] Crossfade real en el reproductor (Web Audio API)
 
-## Credenciales de Prueba
+## Credenciales
 - Admin: admin@fitbeats.com / Admin123!
-- Spotify API: Client ID y Secret configurados en backend/.env
+- Instructor: instructor@test.com / Test1234!
+- Spotify API: Configurado en backend/.env
