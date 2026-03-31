@@ -180,7 +180,11 @@ export default function AdminPage() {
 
     setCreatingInstructor(true);
     try {
-      await axios.post(`${API}/admin/instructors`, instructorForm);
+      const payload = {
+        ...instructorForm,
+        studio_id: instructorForm.studio_id === 'none' ? null : instructorForm.studio_id || null
+      };
+      await axios.post(`${API}/admin/instructors`, payload);
       toast.success('Instructor creado exitosamente');
       setShowInstructorDialog(false);
       setInstructorForm({ name: '', email: '', password: '', studio_id: '' });
@@ -725,7 +729,7 @@ export default function AdminPage() {
                     <SelectValue placeholder="Seleccionar estudio" />
                   </SelectTrigger>
                   <SelectContent className="bg-[#1F1F1F] border-[#27272A]">
-                    <SelectItem value="" className="text-white">Sin estudio</SelectItem>
+                    <SelectItem value="none" className="text-white">Sin estudio</SelectItem>
                     {studios.map((studio) => (
                       <SelectItem key={studio.studio_id} value={studio.studio_id} className="text-white">
                         {studio.name}
