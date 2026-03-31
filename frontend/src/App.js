@@ -7,12 +7,8 @@ import './App.css';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AuthCallback from './pages/AuthCallback';
-import Dashboard from './pages/Dashboard';
-import CatalogPage from './pages/CatalogPage';
-import PlaylistsPage from './pages/PlaylistsPage';
-import PlaylistDetailPage from './pages/PlaylistDetailPage';
+import MainLayout from './pages/MainLayout';
 import AdminPage from './pages/AdminPage';
-import MusicPlayer from './components/MusicPlayer';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -48,8 +44,6 @@ function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
-    // CRITICAL: If returning from OAuth callback, skip the /me check.
-    // AuthCallback will exchange the session_id and establish the session first.
     if (window.location.hash?.includes('session_id=')) {
       setLoading(false);
       return;
@@ -101,34 +95,47 @@ function AuthProvider({ children }) {
 function PlayerProvider({ children }) {
   const [currentMix, setCurrentMix] = useState(null);
   const [playlist, setPlaylist] = useState([]);
+  const [queue, setQueue] = useState([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [shuffle, setShuffle] = useState(false);
+  const [repeat, setRepeat] = useState(false);
 
   const playMix = (mix, mixList = []) => {
     setCurrentMix(mix);
     if (mixList.length > 0) {
       setPlaylist(mixList);
+      setQueue(mixList);
       const idx = mixList.findIndex(m => m.mix_id === mix.mix_id);
       setCurrentIndex(idx >= 0 ? idx : 0);
     } else {
       setPlaylist([mix]);
+      setQueue([mix]);
       setCurrentIndex(0);
     }
     setIsPlaying(true);
   };
 
+  const addToQueue = (mix) => {
+    setQueue(prev => [...prev, mix]);
+  };
+
   const playNext = () => {
-    if (playlist.length > 0 && currentIndex < playlist.length - 1) {
-      const nextMix = playlist[currentIndex + 1];
+    if (queue.length > 0 && currentIndex < queue.length - 1) {
+      const nextMix = queue[currentIndex + 1];
       setCurrentMix(nextMix);
       setCurrentIndex(currentIndex + 1);
+      setIsPlaying(true);
+    } else if (repeat && queue.length > 0) {
+      setCurrentMix(queue[0]);
+      setCurrentIndex(0);
       setIsPlaying(true);
     }
   };
 
   const playPrevious = () => {
-    if (playlist.length > 0 && currentIndex > 0) {
-      const prevMix = playlist[currentIndex - 1];
+    if (queue.length > 0 && currentIndex > 0) {
+      const prevMix = queue[currentIndex - 1];
       setCurrentMix(prevMix);
       setCurrentIndex(currentIndex - 1);
       setIsPlaying(true);
@@ -139,9 +146,18 @@ function PlayerProvider({ children }) {
     setIsPlaying(!isPlaying);
   };
 
+  const toggleShuffle = () => {
+    setShuffle(!shuffle);
+  };
+
+  const toggleRepeat = () => {
+    setRepeat(!repeat);
+  };
+
   const stopPlaying = () => {
     setCurrentMix(null);
     setPlaylist([]);
+    setQueue([]);
     setIsPlaying(false);
     setCurrentIndex(0);
   };
@@ -150,12 +166,18 @@ function PlayerProvider({ children }) {
     <PlayerContext.Provider value={{
       currentMix,
       playlist,
+      queue,
       isPlaying,
       currentIndex,
+      shuffle,
+      repeat,
       playMix,
+      addToQueue,
       playNext,
       playPrevious,
       togglePlay,
+      toggleShuffle,
+      toggleRepeat,
       stopPlaying,
       setIsPlaying
     }}>
@@ -172,7 +194,7 @@ function ProtectedRoute({ children, requireAdmin = false }) {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#007AFF]"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#1DB954]"></div>
       </div>
     );
   }
@@ -182,7 +204,7 @@ function ProtectedRoute({ children, requireAdmin = false }) {
   }
 
   if (requireAdmin && user.role !== 'admin') {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return children;
@@ -192,7 +214,6 @@ function ProtectedRoute({ children, requireAdmin = false }) {
 function AppRouter() {
   const location = useLocation();
   
-  // Check URL fragment for session_id (Google OAuth callback)
   if (location.hash?.includes('session_id=')) {
     return <AuthCallback />;
   }
@@ -202,46 +223,17 @@ function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
-      <Route path="/dashboard" element={
-        <ProtectedRoute>
-          <Dashboard />
-        </ProtectedRoute>
-      } />
-      <Route path="/catalog" element={
-        <ProtectedRoute>
-          <CatalogPage />
-        </ProtectedRoute>
-      } />
-      <Route path="/playlists" element={
-        <ProtectedRoute>
-          <PlaylistsPage />
-        </ProtectedRoute>
-      } />
-      <Route path="/playlists/:id" element={
-        <ProtectedRoute>
-          <PlaylistDetailPage />
-        </ProtectedRoute>
-      } />
       <Route path="/admin" element={
         <ProtectedRoute requireAdmin>
           <AdminPage />
         </ProtectedRoute>
       } />
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/*" element={
+        <ProtectedRoute>
+          <MainLayout />
+        </ProtectedRoute>
+      } />
     </Routes>
-  );
-}
-
-// Main App with Player
-function AppWithPlayer() {
-  const { currentMix } = usePlayer();
-  
-  return (
-    <div className={currentMix ? 'has-player' : ''}>
-      <AppRouter />
-      {currentMix && <MusicPlayer />}
-    </div>
   );
 }
 
@@ -250,7 +242,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <PlayerProvider>
-          <AppWithPlayer />
+          <AppRouter />
         </PlayerProvider>
       </AuthProvider>
     </BrowserRouter>

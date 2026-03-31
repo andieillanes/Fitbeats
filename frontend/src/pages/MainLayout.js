@@ -1,0 +1,428 @@
+import React, { useEffect, useState } from 'react';
+import { Routes, Route, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useAuth, usePlayer, API } from '../App';
+import axios from 'axios';
+import { 
+  House, MusicNote, Disc, MicrophoneStage, Clock, 
+  MagnifyingGlass, Queue, Heart, Plus, Gear,
+  Play, Pause, SkipBack, SkipForward, SpeakerHigh, 
+  SpeakerLow, SpeakerX, Shuffle, Repeat, ListPlus,
+  CaretDown, SignOut, X
+} from '@phosphor-icons/react';
+import { Input } from '../components/ui/input';
+import { Button } from '../components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu';
+import { Slider } from '../components/ui/slider';
+import { Toaster } from '../components/ui/sonner';
+
+// Sub-pages
+import AlbumsView from './views/AlbumsView';
+import AlbumDetailView from './views/AlbumDetailView';
+import SongsView from './views/SongsView';
+import PlaylistsView from './views/PlaylistsView';
+import PlaylistDetailView from './views/PlaylistDetailView';
+import SearchView from './views/SearchView';
+
+export default function MainLayout() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { 
+    currentMix, queue, isPlaying, currentIndex, shuffle, repeat,
+    playNext, playPrevious, togglePlay, toggleShuffle, toggleRepeat, setIsPlaying
+  } = usePlayer();
+  
+  const [showQueue, setShowQueue] = useState(true);
+  const [playlists, setPlaylists] = useState([]);
+  const audioRef = React.useRef(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(0.8);
+  const [isMuted, setIsMuted] = useState(false);
+
+  useEffect(() => {
+    const fetchPlaylists = async () => {
+      try {
+        const res = await axios.get(`${API}/playlists/mine`);
+        setPlaylists(res.data);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchPlaylists();
+  }, []);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.play().catch(() => setIsPlaying(false));
+      } else {
+        audioRef.current.pause();
+      }
+    }
+  }, [isPlaying, currentMix, setIsPlaying]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = isMuted ? 0 : volume;
+    }
+  }, [volume, isMuted]);
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
+
+  const formatTime = (time) => {
+    if (isNaN(time)) return '0:00';
+    const mins = Math.floor(time / 60);
+    const secs = Math.floor(time % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const navItems = [
+    { path: '/', icon: House, label: 'Inicio' },
+    { path: '/albums', icon: Disc, label: 'Álbumes' },
+    { path: '/songs', icon: MusicNote, label: 'Canciones' },
+    { path: '/playlists', icon: ListPlus, label: 'Playlists' },
+  ];
+
+  const isActive = (path) => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
+  };
+
+  const VolumeIcon = isMuted || volume === 0 ? SpeakerX : volume < 0.5 ? SpeakerLow : SpeakerHigh;
+
+  return (
+    <div className={`app-container ${!showQueue ? 'queue-hidden' : ''}`} data-testid="main-layout">
+      {/* Left Sidebar */}
+      <aside className="sidebar" data-testid="sidebar">
+        {/* Logo */}
+        <div className="p-6">
+          <Link to="/" className="flex items-center gap-2" data-testid="logo">
+            <div className="w-8 h-8 rounded-full bg-[#1DB954] flex items-center justify-center">
+              <MusicNote size={18} weight="fill" className="text-black" />
+            </div>
+            <span className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit' }}>
+              FitBeats
+            </span>
+          </Link>
+        </div>
+
+        {/* Search */}
+        <div className="px-4 mb-4">
+          <div className="relative">
+            <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B3B3B3]" size={16} />
+            <Input
+              placeholder="Buscar"
+              className="pl-9 bg-[#242424] border-0 rounded-full text-sm h-10 focus-visible:ring-1 focus-visible:ring-white"
+              onFocus={() => navigate('/search')}
+              data-testid="search-input"
+            />
+          </div>
+        </div>
+
+        {/* Main Navigation */}
+        <nav className="px-2">
+          {navItems.map((item) => (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
+              data-testid={`nav-${item.label.toLowerCase()}`}
+            >
+              <item.icon size={24} weight={isActive(item.path) ? 'fill' : 'regular'} />
+              <span>{item.label}</span>
+            </Link>
+          ))}
+        </nav>
+
+        {/* Playlists Section */}
+        <div className="mt-6 px-4 flex-1 overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-xs uppercase tracking-wider text-[#B3B3B3] font-bold">
+              Mis Playlists
+            </span>
+            <Link to="/playlists">
+              <Plus size={20} className="text-[#B3B3B3] hover:text-white cursor-pointer" />
+            </Link>
+          </div>
+          <div className="overflow-y-auto flex-1 space-y-1">
+            {playlists.slice(0, 10).map((playlist) => (
+              <Link
+                key={playlist.playlist_id}
+                to={`/playlists/${playlist.playlist_id}`}
+                className="nav-item py-2"
+                data-testid={`playlist-nav-${playlist.playlist_id}`}
+              >
+                <span className="truncate">{playlist.name}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        {/* Admin Link */}
+        {user?.role === 'admin' && (
+          <div className="p-4 border-t border-[#282828]">
+            <Link
+              to="/admin"
+              className="nav-item"
+              data-testid="nav-admin"
+            >
+              <Gear size={20} />
+              <span>Administración</span>
+            </Link>
+          </div>
+        )}
+      </aside>
+
+      {/* Main Content */}
+      <main className="main-content" data-testid="main-content">
+        {/* Header */}
+        <header className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-transparent">
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate(-1)}
+              className="w-8 h-8 rounded-full bg-black/70 flex items-center justify-center text-white"
+            >
+              ←
+            </button>
+            <button
+              onClick={() => navigate(1)}
+              className="w-8 h-8 rounded-full bg-black/70 flex items-center justify-center text-white"
+            >
+              →
+            </button>
+          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-2 bg-black/70 rounded-full p-1 pr-3 hover:bg-black/90" data-testid="user-menu">
+                <div className="w-7 h-7 rounded-full bg-[#535353] flex items-center justify-center text-white text-sm font-bold">
+                  {user?.name?.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-sm font-bold text-white">{user?.name}</span>
+                <CaretDown size={16} className="text-white" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-[#282828] border-0 w-52">
+              <DropdownMenuItem className="text-white hover:bg-[#3E3E3E] cursor-pointer">
+                <span className="text-xs text-[#B3B3B3]">{user?.email}</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="bg-[#404040]" />
+              <DropdownMenuItem 
+                onClick={handleLogout}
+                className="text-white hover:bg-[#3E3E3E] cursor-pointer"
+                data-testid="logout-btn"
+              >
+                <SignOut size={16} className="mr-2" />
+                Cerrar sesión
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </header>
+
+        {/* Page Content */}
+        <div className="relative z-[1] px-6 pb-6">
+          <Routes>
+            <Route path="/" element={<AlbumsView title="Novedades" />} />
+            <Route path="/albums" element={<AlbumsView title="Todos los Álbumes" />} />
+            <Route path="/albums/:id" element={<AlbumDetailView />} />
+            <Route path="/songs" element={<SongsView />} />
+            <Route path="/playlists" element={<PlaylistsView />} />
+            <Route path="/playlists/:id" element={<PlaylistDetailView />} />
+            <Route path="/search" element={<SearchView />} />
+          </Routes>
+        </div>
+      </main>
+
+      {/* Right Sidebar - Queue */}
+      {showQueue && (
+        <aside className="queue-sidebar flex flex-col" data-testid="queue-sidebar">
+          <div className="p-4 border-b border-[#282828] flex items-center justify-between">
+            <span className="font-bold text-white">Cola de reproducción</span>
+            <button onClick={() => setShowQueue(false)} className="text-[#B3B3B3] hover:text-white">
+              <X size={20} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {queue.length === 0 ? (
+              <div className="text-center py-8 text-[#B3B3B3]">
+                <Queue size={48} className="mx-auto mb-4 opacity-50" />
+                <p className="text-sm">La cola está vacía</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {queue.map((mix, idx) => (
+                  <div
+                    key={`${mix.mix_id}-${idx}`}
+                    className={`queue-item ${idx === currentIndex ? 'active' : ''}`}
+                    data-testid={`queue-item-${mix.mix_id}`}
+                  >
+                    <div className="w-10 h-10 rounded bg-[#282828] flex-shrink-0 overflow-hidden">
+                      {mix.cover_path ? (
+                        <img src={`${API}/mixes/${mix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <MusicNote size={16} className="text-[#B3B3B3]" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm font-medium truncate ${idx === currentIndex ? 'text-[#1DB954]' : 'text-white'}`}>
+                        {mix.name}
+                      </p>
+                      <p className="text-xs text-[#B3B3B3] truncate">{mix.artist}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
+
+      {/* Player Bar */}
+      <div className="player-bar" data-testid="player-bar">
+        {currentMix && (
+          <audio
+            ref={audioRef}
+            src={`${API}/mixes/${currentMix.mix_id}/audio`}
+            onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+            onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
+            onEnded={playNext}
+            crossOrigin="use-credentials"
+          />
+        )}
+
+        {/* Now Playing */}
+        <div className="flex items-center gap-4 w-[30%] min-w-[180px]">
+          {currentMix ? (
+            <>
+              <div className="w-14 h-14 rounded bg-[#282828] overflow-hidden flex-shrink-0">
+                {currentMix.cover_path ? (
+                  <img src={`${API}/mixes/${currentMix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <MusicNote size={24} className="text-[#B3B3B3]" />
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white truncate">{currentMix.name}</p>
+                <p className="text-xs text-[#B3B3B3] truncate">{currentMix.artist}</p>
+              </div>
+              <button className="text-[#B3B3B3] hover:text-white ml-2">
+                <Heart size={16} />
+              </button>
+            </>
+          ) : (
+            <div className="text-[#B3B3B3] text-sm">Selecciona una canción</div>
+          )}
+        </div>
+
+        {/* Controls */}
+        <div className="flex flex-col items-center gap-2 flex-1 max-w-[722px]">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={toggleShuffle}
+              className={`${shuffle ? 'text-[#1DB954]' : 'text-[#B3B3B3]'} hover:text-white`}
+              data-testid="shuffle-btn"
+            >
+              <Shuffle size={16} />
+            </button>
+            <button 
+              onClick={playPrevious}
+              className="text-[#B3B3B3] hover:text-white"
+              data-testid="prev-btn"
+            >
+              <SkipBack size={20} weight="fill" />
+            </button>
+            <button
+              onClick={togglePlay}
+              className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:scale-105 transition-transform"
+              data-testid="play-pause-btn"
+            >
+              {isPlaying ? (
+                <Pause size={16} weight="fill" className="text-black" />
+              ) : (
+                <Play size={16} weight="fill" className="text-black ml-0.5" />
+              )}
+            </button>
+            <button 
+              onClick={playNext}
+              className="text-[#B3B3B3] hover:text-white"
+              data-testid="next-btn"
+            >
+              <SkipForward size={20} weight="fill" />
+            </button>
+            <button 
+              onClick={toggleRepeat}
+              className={`${repeat ? 'text-[#1DB954]' : 'text-[#B3B3B3]'} hover:text-white`}
+              data-testid="repeat-btn"
+            >
+              <Repeat size={16} />
+            </button>
+          </div>
+          <div className="flex items-center gap-2 w-full">
+            <span className="text-xs text-[#B3B3B3] w-10 text-right">{formatTime(currentTime)}</span>
+            <input
+              type="range"
+              min="0"
+              max={duration || 100}
+              value={currentTime}
+              onChange={(e) => {
+                if (audioRef.current) {
+                  audioRef.current.currentTime = parseFloat(e.target.value);
+                }
+              }}
+              className="flex-1 h-1"
+              style={{
+                background: `linear-gradient(to right, #fff ${(currentTime/duration)*100}%, #4d4d4d ${(currentTime/duration)*100}%)`
+              }}
+            />
+            <span className="text-xs text-[#B3B3B3] w-10">{formatTime(duration)}</span>
+          </div>
+        </div>
+
+        {/* Volume & Extra Controls */}
+        <div className="flex items-center gap-3 justify-end w-[30%] min-w-[180px]">
+          <button 
+            onClick={() => setShowQueue(!showQueue)}
+            className={`${showQueue ? 'text-[#1DB954]' : 'text-[#B3B3B3]'} hover:text-white`}
+            data-testid="queue-toggle-btn"
+          >
+            <Queue size={16} />
+          </button>
+          <button 
+            onClick={() => setIsMuted(!isMuted)}
+            className="text-[#B3B3B3] hover:text-white"
+          >
+            <VolumeIcon size={16} />
+          </button>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={isMuted ? 0 : volume}
+            onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
+            className="w-24 h-1"
+            style={{
+              background: `linear-gradient(to right, #fff ${(isMuted ? 0 : volume)*100}%, #4d4d4d ${(isMuted ? 0 : volume)*100}%)`
+            }}
+          />
+        </div>
+      </div>
+
+      <Toaster position="top-right" toastOptions={{ style: { background: '#282828', border: 'none', color: '#fff' }}} />
+    </div>
+  );
+}
