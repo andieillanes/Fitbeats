@@ -1,53 +1,259 @@
-import { useEffect } from "react";
-import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import './App.css';
+
+// Pages
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import AuthCallback from './pages/AuthCallback';
+import Dashboard from './pages/Dashboard';
+import CatalogPage from './pages/CatalogPage';
+import PlaylistsPage from './pages/PlaylistsPage';
+import PlaylistDetailPage from './pages/PlaylistDetailPage';
+import AdminPage from './pages/AdminPage';
+import MusicPlayer from './components/MusicPlayer';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+export const API = `${BACKEND_URL}/api`;
 
-const Home = () => {
-  const helloWorldApi = async () => {
+// Configure axios defaults
+axios.defaults.withCredentials = true;
+
+// Auth Context
+export const AuthContext = createContext(null);
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+};
+
+// Player Context
+export const PlayerContext = createContext(null);
+
+export const usePlayer = () => {
+  const context = useContext(PlayerContext);
+  if (!context) {
+    throw new Error('usePlayer must be used within PlayerProvider');
+  }
+  return context;
+};
+
+// Auth Provider
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const checkAuth = useCallback(async () => {
+    // CRITICAL: If returning from OAuth callback, skip the /me check.
+    // AuthCallback will exchange the session_id and establish the session first.
+    if (window.location.hash?.includes('session_id=')) {
+      setLoading(false);
+      return;
+    }
+    
     try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
+      const response = await axios.get(`${API}/auth/me`);
+      setUser(response.data);
+    } catch {
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  const login = async (email, password) => {
+    const response = await axios.post(`${API}/auth/login`, { email, password });
+    setUser(response.data);
+    return response.data;
+  };
+
+  const register = async (email, password, name) => {
+    const response = await axios.post(`${API}/auth/register`, { email, password, name });
+    setUser(response.data);
+    return response.data;
+  };
+
+  const logout = async () => {
+    await axios.post(`${API}/auth/logout`);
+    setUser(null);
+  };
+
+  const setUserData = (userData) => {
+    setUser(userData);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, register, logout, checkAuth, setUserData }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// Player Provider
+function PlayerProvider({ children }) {
+  const [currentMix, setCurrentMix] = useState(null);
+  const [playlist, setPlaylist] = useState([]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const playMix = (mix, mixList = []) => {
+    setCurrentMix(mix);
+    if (mixList.length > 0) {
+      setPlaylist(mixList);
+      const idx = mixList.findIndex(m => m.mix_id === mix.mix_id);
+      setCurrentIndex(idx >= 0 ? idx : 0);
+    } else {
+      setPlaylist([mix]);
+      setCurrentIndex(0);
+    }
+    setIsPlaying(true);
+  };
+
+  const playNext = () => {
+    if (playlist.length > 0 && currentIndex < playlist.length - 1) {
+      const nextMix = playlist[currentIndex + 1];
+      setCurrentMix(nextMix);
+      setCurrentIndex(currentIndex + 1);
+      setIsPlaying(true);
     }
   };
 
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
+  const playPrevious = () => {
+    if (playlist.length > 0 && currentIndex > 0) {
+      const prevMix = playlist[currentIndex - 1];
+      setCurrentMix(prevMix);
+      setCurrentIndex(currentIndex - 1);
+      setIsPlaying(true);
+    }
+  };
+
+  const togglePlay = () => {
+    setIsPlaying(!isPlaying);
+  };
+
+  const stopPlaying = () => {
+    setCurrentMix(null);
+    setPlaylist([]);
+    setIsPlaying(false);
+    setCurrentIndex(0);
+  };
 
   return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
+    <PlayerContext.Provider value={{
+      currentMix,
+      playlist,
+      isPlaying,
+      currentIndex,
+      playMix,
+      playNext,
+      playPrevious,
+      togglePlay,
+      stopPlaying,
+      setIsPlaying
+    }}>
+      {children}
+    </PlayerContext.Provider>
+  );
+}
+
+// Protected Route
+function ProtectedRoute({ children, requireAdmin = false }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#007AFF]"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (requireAdmin && user.role !== 'admin') {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+}
+
+// Main App Router
+function AppRouter() {
+  const location = useLocation();
+  
+  // Check URL fragment for session_id (Google OAuth callback)
+  if (location.hash?.includes('session_id=')) {
+    return <AuthCallback />;
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/dashboard" element={
+        <ProtectedRoute>
+          <Dashboard />
+        </ProtectedRoute>
+      } />
+      <Route path="/catalog" element={
+        <ProtectedRoute>
+          <CatalogPage />
+        </ProtectedRoute>
+      } />
+      <Route path="/playlists" element={
+        <ProtectedRoute>
+          <PlaylistsPage />
+        </ProtectedRoute>
+      } />
+      <Route path="/playlists/:id" element={
+        <ProtectedRoute>
+          <PlaylistDetailPage />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin" element={
+        <ProtectedRoute requireAdmin>
+          <AdminPage />
+        </ProtectedRoute>
+      } />
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
+  );
+}
+
+// Main App with Player
+function AppWithPlayer() {
+  const { currentMix } = usePlayer();
+  
+  return (
+    <div className={currentMix ? 'has-player' : ''}>
+      <AppRouter />
+      {currentMix && <MusicPlayer />}
     </div>
   );
-};
+}
 
 function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <PlayerProvider>
+          <AppWithPlayer />
+        </PlayerProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 
