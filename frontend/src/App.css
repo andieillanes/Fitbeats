@@ -53,3 +53,70 @@
     transparent 4px
   );
 }
+
+/* Player bar range inputs - progress & volume */
+.player-bar input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  transition: height 0.1s;
+}
+
+.player-bar input[type="range"]:hover {
+  height: 6px;
+}
+
+/* Webkit (Chrome, Safari, Edge) */
+.player-bar input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.player-bar input[type="range"]:hover::-webkit-slider-runnable-track {
+  height: 6px;
+}
+
+.player-bar input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  margin-top: -4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+
+.player-bar input[type="range"]:hover::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+/* Firefox */
+.player-bar input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: transparent;
+  border: none;
+}
+
+.player-bar input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+
+.player-bar input[type="range"]:hover::-moz-range-thumb {
+  opacity: 1;
+}

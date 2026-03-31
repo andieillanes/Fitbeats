@@ -44,6 +44,7 @@ export default function MainLayout() {
   const [showQueue, setShowQueue] = useState(true);
   const [playlists, setPlaylists] = useState([]);
   const audioRef = React.useRef(null);
+  const rafRef = React.useRef(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
@@ -53,6 +54,41 @@ export default function MainLayout() {
   const lastTrackRef = React.useRef(null);
 
   const isSpotifyTrack = currentMix?.type === 'spotify';
+
+  // Get valid duration - handles NaN, Infinity, 0 from audio element
+  const getValidDuration = () => {
+    if (isSpotifyTrack && spotifyPlaying) {
+      return (spotify?.spotifyDuration || currentMix?.duration_ms || 0) / 1000;
+    }
+    // For local audio: use audio element duration if valid, otherwise fallback to mix metadata
+    const audioDur = duration;
+    if (audioDur && isFinite(audioDur) && audioDur > 0) return audioDur;
+    // Fallback to mix metadata duration (stored in seconds)
+    if (currentMix?.duration) return currentMix.duration;
+    return 0;
+  };
+
+  const validDuration = getValidDuration();
+  const displayTime = isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyPosition || 0) / 1000 : currentTime;
+
+  // Smooth progress tracking via requestAnimationFrame for local audio
+  useEffect(() => {
+    if (isSpotifyTrack || !isPlaying) {
+      if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+      return;
+    }
+    const update = () => {
+      if (audioRef.current && !audioRef.current.paused) {
+        setCurrentTime(audioRef.current.currentTime);
+        // Also update duration if it becomes available
+        const d = audioRef.current.duration;
+        if (d && isFinite(d) && d > 0) setDuration(d);
+      }
+      rafRef.current = requestAnimationFrame(update);
+    };
+    rafRef.current = requestAnimationFrame(update);
+    return () => { if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } };
+  }, [isPlaying, isSpotifyTrack, currentMix]);
 
   useEffect(() => {
     const fetchPlaylists = async () => {
@@ -427,14 +463,21 @@ export default function MainLayout() {
           ref={audioRef}
           preload="auto"
           onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
-          onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
+          onLoadedMetadata={() => {
+            const d = audioRef.current?.duration;
+            if (d && isFinite(d) && d > 0) setDuration(d);
+          }}
+          onDurationChange={() => {
+            const d = audioRef.current?.duration;
+            if (d && isFinite(d) && d > 0) setDuration(d);
+          }}
           onCanPlay={() => {
-            if (isPlaying && audioRef.current.paused) {
+            if (isPlaying && audioRef.current.paused && !isSpotifyTrack) {
               audioRef.current.play().catch(() => {});
             }
           }}
           onCanPlayThrough={() => {
-            if (isPlaying && audioRef.current.paused) {
+            if (isPlaying && audioRef.current.paused && !isSpotifyTrack) {
               audioRef.current.play().catch(() => {});
             }
           }}
@@ -597,33 +640,34 @@ export default function MainLayout() {
           </div>
           <div className="flex items-center gap-2 w-full">
             <span className="text-xs text-[#B3B3B3] w-10 text-right">
-              {formatTime(isSpotifyTrack && spotifyPlaying ? spotify?.spotifyPosition / 1000 : currentTime)}
+              {formatTime(displayTime)}
             </span>
             <input
               type="range"
               min="0"
-              max={(isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyDuration || currentMix?.duration_ms || 0) / 1000 : duration) || 100}
-              value={isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyPosition || 0) / 1000 : currentTime}
+              max={validDuration || 1}
+              step="0.1"
+              value={displayTime}
               onChange={(e) => {
                 const val = parseFloat(e.target.value);
                 if (isSpotifyTrack && spotifyPlaying && spotify?.seekSpotify) {
                   spotify.seekSpotify(val * 1000);
                 } else if (audioRef.current) {
                   audioRef.current.currentTime = val;
+                  setCurrentTime(val);
                 }
               }}
               className="flex-1 h-1"
               style={{
                 background: (() => {
-                  const pos = isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyPosition || 0) / 1000 : currentTime;
-                  const dur = isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyDuration || currentMix?.duration_ms || 1) / 1000 : (duration || 1);
-                  const pct = (pos / dur) * 100;
+                  const dur = validDuration || 1;
+                  const pct = Math.min((displayTime / dur) * 100, 100);
                   return `linear-gradient(to right, #fff ${pct}%, #4d4d4d ${pct}%)`;
                 })()
               }}
             />
             <span className="text-xs text-[#B3B3B3] w-10">
-              {formatTime(isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyDuration || currentMix?.duration_ms || 0) / 1000 : duration)}
+              {formatTime(validDuration)}
             </span>
           </div>
         </div>
