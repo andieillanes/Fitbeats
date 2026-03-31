@@ -677,6 +677,106 @@ async def create_mix(
     mix_doc["album_name"] = album["name"]
     return mix_doc
 
+@api_router.post("/mixes/batch")
+async def batch_upload_mixes(
+    request: Request,
+    artist: str = Query(...),
+    album_id: Optional[str] = Query(None),
+    new_album_name: Optional[str] = Query(None),
+    new_album_year: Optional[int] = Query(None),
+    audio_files: List[UploadFile] = File(...),
+    album_cover: Optional[UploadFile] = File(None)
+):
+    """
+    Upload multiple mixes at once.
+    Either provide album_id for existing album, or new_album_name + new_album_year to create new album.
+    """
+    await require_admin(request)
+    
+    # Determine album
+    album = None
+    if album_id:
+        album = await db.albums.find_one({"album_id": album_id, "is_active": True})
+        if not album:
+            raise HTTPException(status_code=400, detail="Álbum no encontrado")
+    elif new_album_name:
+        # Create new album
+        album_id = f"album_{uuid.uuid4().hex[:12]}"
+        cover_path = None
+        
+        if album_cover:
+            cover_content = await album_cover.read()
+            cover_ext = album_cover.filename.split(".")[-1] if "." in album_cover.filename else "jpg"
+            cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
+            put_object(cover_path, cover_content, album_cover.content_type or "image/jpeg")
+        
+        album = {
+            "album_id": album_id,
+            "name": new_album_name,
+            "artist": artist,
+            "year": new_album_year or datetime.now().year,
+            "description": None,
+            "cover_path": cover_path,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "is_active": True
+        }
+        await db.albums.insert_one(album)
+        logger.info(f"Created new album: {new_album_name}")
+    else:
+        raise HTTPException(status_code=400, detail="Debes seleccionar un álbum existente o crear uno nuevo")
+    
+    # Process each audio file
+    created_mixes = []
+    errors = []
+    
+    for audio_file in audio_files:
+        try:
+            audio_content = await audio_file.read()
+            
+            # Extract metadata
+            metadata = extract_audio_metadata(audio_content, audio_file.filename)
+            
+            # Get name from filename (remove extension)
+            filename = audio_file.filename
+            name = filename.rsplit(".", 1)[0] if "." in filename else filename
+            
+            mix_id = f"mix_{uuid.uuid4().hex[:12]}"
+            
+            # Upload audio
+            audio_ext = filename.split(".")[-1] if "." in filename else "mp3"
+            audio_path = f"{APP_NAME}/mixes/{mix_id}/audio.{audio_ext}"
+            put_object(audio_path, audio_content, audio_file.content_type or "audio/mpeg")
+            
+            mix_doc = {
+                "mix_id": mix_id,
+                "name": name,
+                "artist": artist,
+                "bpm": metadata.get("bpm"),
+                "duration": metadata.get("duration"),
+                "genre": metadata.get("genre"),
+                "album_id": album["album_id"],
+                "description": None,
+                "audio_path": audio_path,
+                "cover_path": album.get("cover_path"),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "is_active": True
+            }
+            await db.mixes.insert_one(mix_doc)
+            mix_doc.pop("_id", None)
+            mix_doc["album_name"] = album["name"]
+            created_mixes.append(mix_doc)
+            
+        except Exception as e:
+            logger.error(f"Error uploading {audio_file.filename}: {e}")
+            errors.append({"filename": audio_file.filename, "error": str(e)})
+    
+    return {
+        "album": {"album_id": album["album_id"], "name": album["name"]},
+        "created_mixes": len(created_mixes),
+        "mixes": created_mixes,
+        "errors": errors
+    }
+
 @api_router.get("/mixes", response_model=List[MixResponse])
 async def list_mixes(
     request: Request,

@@ -70,6 +70,19 @@ export default function AdminPage() {
   const [uploading, setUploading] = useState(false);
   const [deleteMix, setDeleteMix] = useState(null);
 
+  // Batch upload state
+  const [showBatchDialog, setShowBatchDialog] = useState(false);
+  const [batchForm, setBatchForm] = useState({
+    artist: '',
+    albumMode: 'existing', // 'existing' or 'new'
+    album_id: '',
+    new_album_name: '',
+    new_album_year: new Date().getFullYear()
+  });
+  const [batchAudioFiles, setBatchAudioFiles] = useState([]);
+  const [batchCoverFile, setBatchCoverFile] = useState(null);
+  const [batchUploading, setBatchUploading] = useState(false);
+
   // Instructors state
   const [instructors, setInstructors] = useState([]);
   const [studios, setStudios] = useState([]);
@@ -225,6 +238,86 @@ export default function AdminPage() {
     setUploadForm({ name: '', artist: '', bpm: '', duration: '', genre: '', album_id: '', description: '' });
     setAudioFile(null);
     setCoverFile(null);
+  };
+
+  // Batch upload handler
+  const handleBatchUpload = async () => {
+    if (batchAudioFiles.length === 0) {
+      toast.error('Selecciona al menos un archivo de audio');
+      return;
+    }
+
+    if (!batchForm.artist) {
+      toast.error('El artista es requerido');
+      return;
+    }
+
+    if (batchForm.albumMode === 'existing' && !batchForm.album_id) {
+      toast.error('Selecciona un álbum existente');
+      return;
+    }
+
+    if (batchForm.albumMode === 'new' && !batchForm.new_album_name) {
+      toast.error('Ingresa el nombre del nuevo álbum');
+      return;
+    }
+
+    setBatchUploading(true);
+    try {
+      const formData = new FormData();
+      
+      // Add all audio files
+      for (const file of batchAudioFiles) {
+        formData.append('audio_files', file);
+      }
+      
+      // Add cover if creating new album
+      if (batchForm.albumMode === 'new' && batchCoverFile) {
+        formData.append('album_cover', batchCoverFile);
+      }
+
+      const queryParams = new URLSearchParams({
+        artist: batchForm.artist,
+        ...(batchForm.albumMode === 'existing' && { album_id: batchForm.album_id }),
+        ...(batchForm.albumMode === 'new' && { 
+          new_album_name: batchForm.new_album_name,
+          new_album_year: batchForm.new_album_year.toString()
+        })
+      });
+
+      const response = await axios.post(`${API}/mixes/batch?${queryParams.toString()}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      const result = response.data;
+      toast.success(`${result.created_mixes} mixes subidos al álbum "${result.album.name}"`);
+      
+      if (result.errors && result.errors.length > 0) {
+        toast.error(`${result.errors.length} archivos fallaron`);
+      }
+
+      setShowBatchDialog(false);
+      resetBatchForm();
+      fetchData();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(detail || 'Error al subir los mixes');
+      console.error(error);
+    } finally {
+      setBatchUploading(false);
+    }
+  };
+
+  const resetBatchForm = () => {
+    setBatchForm({
+      artist: '',
+      albumMode: 'existing',
+      album_id: '',
+      new_album_name: '',
+      new_album_year: new Date().getFullYear()
+    });
+    setBatchAudioFiles([]);
+    setBatchCoverFile(null);
   };
 
   const handleDeleteMix = async () => {
@@ -454,21 +547,34 @@ export default function AdminPage() {
                 <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>
                   Catálogo de Mixes
                 </h2>
-                <Button
-                  onClick={() => {
-                    if (albums.length === 0) {
-                      toast.error('Debes crear un álbum primero');
-                      setActiveTab('albums');
-                      return;
-                    }
-                    setShowUploadDialog(true);
-                  }}
-                  className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold"
-                  data-testid="upload-mix-btn"
-                >
-                  <Upload size={18} className="mr-2" />
-                  Subir mix
-                </Button>
+                <div className="flex gap-3">
+                  <Button
+                    onClick={() => {
+                      setShowBatchDialog(true);
+                    }}
+                    variant="outline"
+                    className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A] font-bold"
+                    data-testid="batch-upload-btn"
+                  >
+                    <Upload size={18} className="mr-2" />
+                    Subir en lote
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (albums.length === 0) {
+                        toast.error('Debes crear un álbum primero');
+                        setActiveTab('albums');
+                        return;
+                      }
+                      setShowUploadDialog(true);
+                    }}
+                    className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold"
+                    data-testid="upload-mix-btn"
+                  >
+                    <Plus size={18} className="mr-2" />
+                    Subir mix individual
+                  </Button>
+                </div>
               </div>
 
               {mixes.length === 0 ? (
@@ -478,12 +584,21 @@ export default function AdminPage() {
                   {albums.length === 0 ? (
                     <p className="text-sm text-[#71717A]">Crea un álbum primero para poder subir mixes</p>
                   ) : (
-                    <Button
-                      onClick={() => setShowUploadDialog(true)}
-                      className="bg-[#007AFF] hover:bg-[#3395FF]"
-                    >
-                      Subir primer mix
-                    </Button>
+                    <div className="flex gap-3 justify-center">
+                      <Button
+                        onClick={() => setShowBatchDialog(true)}
+                        variant="outline"
+                        className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
+                      >
+                        Subir en lote
+                      </Button>
+                      <Button
+                        onClick={() => setShowUploadDialog(true)}
+                        className="bg-[#007AFF] hover:bg-[#3395FF]"
+                      >
+                        Subir mix individual
+                      </Button>
+                    </div>
                   )}
                 </div>
               ) : (
@@ -930,6 +1045,152 @@ export default function AdminPage() {
                 data-testid="confirm-upload-mix-btn"
               >
                 {uploading ? 'Subiendo...' : 'Subir mix'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Batch Upload Dialog */}
+        <Dialog open={showBatchDialog} onOpenChange={setShowBatchDialog}>
+          <DialogContent className="bg-[#141414] border-[#27272A] text-white max-w-lg">
+            <DialogHeader>
+              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>
+                Subir mixes en lote
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 mt-4 max-h-[60vh] overflow-y-auto pr-2">
+              <p className="text-sm text-[#A1A1AA]">
+                Sube múltiples archivos de audio. El nombre del mix se tomará del nombre del archivo.
+                BPM, duración y género se detectan automáticamente.
+              </p>
+
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                  Artista / DJ *
+                </label>
+                <Input
+                  value={batchForm.artist}
+                  onChange={(e) => setBatchForm({ ...batchForm, artist: e.target.value })}
+                  placeholder="Nombre del artista o DJ"
+                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
+                  data-testid="batch-artist-input"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                  Álbum
+                </label>
+                <div className="flex gap-4 mb-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={batchForm.albumMode === 'existing'}
+                      onChange={() => setBatchForm({ ...batchForm, albumMode: 'existing' })}
+                      className="accent-[#007AFF]"
+                    />
+                    <span className="text-sm">Álbum existente</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={batchForm.albumMode === 'new'}
+                      onChange={() => setBatchForm({ ...batchForm, albumMode: 'new' })}
+                      className="accent-[#007AFF]"
+                    />
+                    <span className="text-sm">Crear nuevo álbum</span>
+                  </label>
+                </div>
+
+                {batchForm.albumMode === 'existing' ? (
+                  <Select
+                    value={batchForm.album_id}
+                    onValueChange={(value) => setBatchForm({ ...batchForm, album_id: value })}
+                  >
+                    <SelectTrigger className="bg-[#1F1F1F] border-[#27272A] text-white" data-testid="batch-album-select">
+                      <SelectValue placeholder="Seleccionar álbum" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1F1F1F] border-[#27272A]">
+                      {albums.map((album) => (
+                        <SelectItem key={album.album_id} value={album.album_id} className="text-white">
+                          {album.name} ({album.year})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="space-y-3">
+                    <Input
+                      value={batchForm.new_album_name}
+                      onChange={(e) => setBatchForm({ ...batchForm, new_album_name: e.target.value })}
+                      placeholder="Nombre del nuevo álbum"
+                      className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
+                      data-testid="batch-new-album-name"
+                    />
+                    <Input
+                      type="number"
+                      value={batchForm.new_album_year}
+                      onChange={(e) => setBatchForm({ ...batchForm, new_album_year: parseInt(e.target.value) || new Date().getFullYear() })}
+                      placeholder="Año"
+                      className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
+                      data-testid="batch-new-album-year"
+                    />
+                    <div>
+                      <label className="text-xs text-[#71717A] mb-1 block">Portada del álbum</label>
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => setBatchCoverFile(e.target.files[0])}
+                        className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1"
+                        data-testid="batch-album-cover"
+                      />
+                      {batchCoverFile && (
+                        <p className="text-sm text-[#34C759] mt-1">{batchCoverFile.name}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                  Archivos de audio *
+                </label>
+                <Input
+                  type="file"
+                  accept="audio/*"
+                  multiple
+                  onChange={(e) => setBatchAudioFiles(Array.from(e.target.files))}
+                  className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1"
+                  data-testid="batch-audio-input"
+                />
+                {batchAudioFiles.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-sm text-[#34C759]">{batchAudioFiles.length} archivos seleccionados:</p>
+                    <div className="max-h-32 overflow-y-auto">
+                      {batchAudioFiles.map((file, i) => (
+                        <p key={i} className="text-xs text-[#71717A] truncate">{file.name}</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <DialogFooter className="mt-6">
+              <Button
+                variant="outline"
+                onClick={() => { setShowBatchDialog(false); resetBatchForm(); }}
+                className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleBatchUpload}
+                disabled={batchUploading}
+                className="bg-[#007AFF] hover:bg-[#3395FF]"
+                data-testid="confirm-batch-upload-btn"
+              >
+                {batchUploading ? `Subiendo ${batchAudioFiles.length} mixes...` : `Subir ${batchAudioFiles.length} mixes`}
               </Button>
             </DialogFooter>
           </DialogContent>
