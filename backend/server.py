@@ -335,12 +335,14 @@ class PlaylistResponse(BaseModel):
     playlist_id: str
     name: str
     description: Optional[str] = None
-    is_public: bool
-    user_id: str
-    user_name: str
-    mix_ids: List[str]
-    created_at: str
-    updated_at: str
+    is_public: bool = False
+    user_id: str = ""
+    user_name: str = ""
+    mix_ids: List[str] = []
+    items: list = []
+    spotify_source: Optional[str] = None
+    created_at: str = ""
+    updated_at: str = ""
 
 # ==================== CLASS MODE MODELS ====================
 class ClassTrackConfig(BaseModel):
@@ -1061,13 +1063,31 @@ async def list_playlists(request: Request, public_only: bool = False):
         query = {"$or": [{"user_id": user["user_id"]}, {"is_public": True}]}
     
     playlists = await db.playlists.find(query, {"_id": 0}).to_list(1000)
-    return [PlaylistResponse(**p) for p in playlists]
+    results = []
+    for p in playlists:
+        if "user_name" not in p:
+            p["user_name"] = ""
+        if "mix_ids" not in p:
+            p["mix_ids"] = []
+        if "items" not in p:
+            p["items"] = []
+        results.append(PlaylistResponse(**p))
+    return results
 
 @api_router.get("/playlists/mine", response_model=List[PlaylistResponse])
 async def my_playlists(request: Request):
     user = await get_current_user(request)
     playlists = await db.playlists.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(1000)
-    return [PlaylistResponse(**p) for p in playlists]
+    results = []
+    for p in playlists:
+        if "user_name" not in p:
+            p["user_name"] = user.get("name", user.get("email", ""))
+        if "mix_ids" not in p:
+            p["mix_ids"] = []
+        if "items" not in p:
+            p["items"] = []
+        results.append(PlaylistResponse(**p))
+    return results
 
 @api_router.get("/playlists/{playlist_id}", response_model=PlaylistResponse)
 async def get_playlist(playlist_id: str, request: Request):
@@ -1077,8 +1097,17 @@ async def get_playlist(playlist_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Playlist not found")
     
     # Check access
-    if not playlist["is_public"] and playlist["user_id"] != user["user_id"]:
+    if not playlist.get("is_public") and playlist.get("user_id") != user["user_id"] and user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Fill missing fields for backwards compatibility
+    if "user_name" not in playlist:
+        owner = await db.users.find_one({"user_id": playlist.get("user_id")}, {"_id": 0, "name": 1, "email": 1})
+        playlist["user_name"] = owner.get("name", owner.get("email", "")) if owner else ""
+    if "mix_ids" not in playlist:
+        playlist["mix_ids"] = []
+    if "items" not in playlist:
+        playlist["items"] = []
     
     return PlaylistResponse(**playlist)
 
@@ -1514,7 +1543,9 @@ async def import_spotify_playlist(spotify_playlist_id: str, request: Request):
         "playlist_id": playlist_id,
         "name": playlist_name,
         "user_id": user["user_id"],
+        "user_name": user.get("name", user.get("email", "")),
         "items": items,
+        "mix_ids": [],
         "is_public": False,
         "spotify_source": spotify_playlist_id,
         "created_at": datetime.now(timezone.utc).isoformat(),

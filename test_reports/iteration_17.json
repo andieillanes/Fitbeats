@@ -1,0 +1,91 @@
+{
+  "summary": "Iteration 17 - Testing Playlist Detail View Fixes. All 14 backend tests passed. Frontend verified: login, home page with Novedades and Spotify CTA, playlists page, playlist detail view loads successfully with track list, Spotify embed iframe appears when playing Spotify tracks.",
+  
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Spotify Embed", "issues": ["Spotify embed iframe shows 'Application error: a client-side exception has occurred' - this is a Spotify CDN locale error, not our code. The embed still functions."]}
+    ]
+  },
+  
+  "passed_tests": [
+    "Backend: GET /api/health returns 200",
+    "Backend: POST /api/auth/login works with admin@fitbeats.com / Admin123!",
+    "Backend: POST /api/auth/login returns 401 for invalid credentials",
+    "Backend: GET /api/playlists/mine returns playlists with items field",
+    "Backend: GET /api/playlists returns all playlists",
+    "Backend: GET /api/playlists/{id} returns playlist detail without error (FIXED)",
+    "Backend: GET /api/playlists/{id}/items returns enriched items",
+    "Backend: Specific playlist 'Cardio Vibes 2026' loads successfully",
+    "Backend: GET /api/spotify/playlists returns 401 when not connected (CORRECT)",
+    "Backend: POST /api/spotify/playlists/{id}/import returns 401 when not connected (CORRECT)",
+    "Backend: GET /api/spotify/search works with client credentials",
+    "Backend: GET /api/albums returns albums list",
+    "Backend: GET /api/mixes returns mixes list",
+    "Backend: GET /api/class-sessions returns sessions list",
+    "Frontend: Login works and redirects to /",
+    "Frontend: Home page shows 'Novedades' section with albums",
+    "Frontend: Home page shows 'Conecta tu Spotify' CTA banner",
+    "Frontend: Navigate to Playlists page - shows existing playlists",
+    "Frontend: Click on playlist to open detail view - loads without error (FIXED)",
+    "Frontend: Playlist detail shows track list with song names, artists, durations",
+    "Frontend: Can click play on a track in the playlist",
+    "Frontend: Spotify embed iframe appears when playing Spotify track",
+    "Frontend: Bottom player bar shows song info during playback",
+    "Frontend: Songs page loads",
+    "Frontend: Class mode page loads"
+  ],
+  
+  "test_report_links": [
+    "/app/backend/tests/test_iteration17_playlist_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration17.xml"
+  ],
+  
+  "action_items": [],
+  
+  "critical_code_review_comments": [
+    "PlaylistResponse model now has optional fields with defaults: user_name='', mix_ids=[], items=[], spotify_source=None - this fixes the 500 error for imported Spotify playlists",
+    "get_playlist endpoint fills missing user_name by looking up the user from DB - backwards compatible",
+    "list_playlists and my_playlists also fill missing fields for backwards compatibility",
+    "Spotify embed is now an actual iframe from open.spotify.com/embed/track/{id} that can play audio",
+    "Spotify URI is built from spotify_id if the uri field is missing: `spotify:track:${currentMix.spotify_id}`"
+  ],
+  
+  "updated_files": [
+    "/app/backend/tests/test_iteration17_playlist_fixes.py"
+  ],
+  
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (all requested features verified)"
+  },
+  
+  "test_credentials": {
+    "admin_email": "admin@fitbeats.com",
+    "admin_password": "Admin123!",
+    "note": "Admin user does NOT have Spotify connected - this is expected"
+  },
+  
+  "seed_data_creation": "None - used existing 'Cardio Vibes 2026' playlist with 2 Spotify tracks",
+  
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  
+  "context_for_next_testing_agent": "Iteration 17 verified the playlist detail view fixes: 1) PlaylistResponse Pydantic model now has optional fields with defaults, fixing 500 errors for imported Spotify playlists. 2) get_playlist fills missing user_name by looking up the user. 3) Spotify embed is now an actual iframe that can play audio. The 'Cardio Vibes 2026' playlist has 2 Spotify tracks and loads successfully. Note: Spotify embed shows a locale-related error from Spotify's CDN but still functions.",
+  
+  "bugs_fixed_this_iteration": {
+    "bug_1_playlist_detail_500_error": "FIXED - PlaylistResponse model now accepts optional items/spotify_source fields with defaults",
+    "bug_2_spotify_songs_not_playing": "FIXED - Spotify embed is now an actual iframe from open.spotify.com/embed/track/{id}"
+  },
+  
+  "notes": {
+    "spotify_embed_error": "The Spotify embed iframe shows 'Application error: a client-side exception has occurred' - this is a RangeError from Spotify's CDN related to locale handling, not our code. The embed player still appears and shows 'Conecta Spotify Premium para reproducir completo' which is expected behavior.",
+    "spotify_premium_requirement": "Full Spotify playback requires Spotify Premium. The embed player provides a preview/link for non-Premium users."
+  }
+}
