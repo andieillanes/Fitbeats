@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, API } from '../../App';
 import axios from 'axios';
-import { ListPlus, Plus, Globe, Lock, MusicNote } from '@phosphor-icons/react';
+import { ListPlus, Plus, Globe, Lock, MusicNote, SpotifyLogo } from '@phosphor-icons/react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Switch } from '../../components/ui/switch';
@@ -96,26 +96,35 @@ export default function PlaylistsView() {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 mb-12">
-          {myPlaylists.map((playlist) => (
-            <Link
-              key={playlist.playlist_id}
-              to={`/playlists/${playlist.playlist_id}`}
-              className="album-card group"
-              data-testid={`playlist-card-${playlist.playlist_id}`}
-            >
-              <div className="album-cover-container bg-gradient-to-br from-[#535353] to-[#282828]">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <MusicNote size={48} className="text-[#B3B3B3]" />
+          {myPlaylists.map((playlist) => {
+            const trackCount = (playlist.items?.length || 0) + (playlist.mix_ids?.length || 0);
+            const firstImage = playlist.items?.find(i => i.album_image)?.album_image;
+            const isSpotifyImport = !!playlist.spotify_source;
+            return (
+              <Link
+                key={playlist.playlist_id}
+                to={`/playlists/${playlist.playlist_id}`}
+                className="album-card group"
+                data-testid={`playlist-card-${playlist.playlist_id}`}
+              >
+                <div className="album-cover-container bg-gradient-to-br from-[#535353] to-[#282828]">
+                  {firstImage ? (
+                    <img src={firstImage} alt={playlist.name} className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <MusicNote size={48} className="text-[#B3B3B3]" />
+                    </div>
+                  )}
                 </div>
-              </div>
-              
-              <h3 className="font-bold text-white truncate mb-1">{playlist.name}</h3>
-              <div className="flex items-center gap-2 text-xs text-[#B3B3B3]">
-                {playlist.is_public ? <Globe size={12} /> : <Lock size={12} />}
-                <span>{playlist.mix_ids.length} canciones</span>
-              </div>
-            </Link>
-          ))}
+                
+                <h3 className="font-bold text-white truncate mb-1">{playlist.name}</h3>
+                <div className="flex items-center gap-2 text-xs text-[#B3B3B3]">
+                  {isSpotifyImport ? <SpotifyLogo size={12} weight="fill" className="text-[#1DB954]" /> : playlist.is_public ? <Globe size={12} /> : <Lock size={12} />}
+                  <span>{trackCount} canciones</span>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
 

@@ -106,7 +106,7 @@ export default function MainLayout() {
       }
     };
     fetchPlaylists();
-  }, []);
+  }, [location.pathname]);
 
   // Offline audio cache helpers
   const getOfflineAudio = async (mixId) => {
