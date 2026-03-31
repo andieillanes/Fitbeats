@@ -4,7 +4,7 @@ import { useAuth, usePlayer, API } from '../../App';
 import axios from 'axios';
 import { 
   Play, Pause, Clock, MusicNote, PencilSimple, Trash, Globe, Lock, 
-  Share, SpotifyLogo, Download, Plus, MagnifyingGlass, X 
+  Share, SpotifyLogo, CloudArrowDown, Plus, MagnifyingGlass, X, WifiSlash
 } from '@phosphor-icons/react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -168,26 +168,81 @@ export default function PlaylistDetailView() {
     toast.success('Enlace de playlist copiado');
   };
 
-  const handleDownloadAll = async () => {
-    const mixCount = items.filter(i => i.type === 'mix').length;
-    if (mixCount === 0) {
-      toast.info('No hay mixes locales para descargar');
+  const [offlineSaving, setOfflineSaving] = useState(false);
+  const [offlineTracks, setOfflineTracks] = useState([]);
+
+  // Check which tracks are cached offline
+  useEffect(() => {
+    checkOfflineTracks();
+  }, [items]);
+
+  const checkOfflineTracks = async () => {
+    try {
+      const db = await openOfflineDB();
+      const cached = [];
+      for (const item of items) {
+        if (item.type === 'mix' && item.mix_id) {
+          const exists = await getFromDB(db, item.mix_id);
+          if (exists) cached.push(item.mix_id);
+        }
+      }
+      setOfflineTracks(cached);
+    } catch { /* ignore */ }
+  };
+
+  const openOfflineDB = () => {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('fitbeats_offline', 1);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('audio')) {
+          db.createObjectStore('audio', { keyPath: 'mix_id' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  };
+
+  const getFromDB = (db, mixId) => {
+    return new Promise((resolve) => {
+      const tx = db.transaction('audio', 'readonly');
+      const store = tx.objectStore('audio');
+      const req = store.get(mixId);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    });
+  };
+
+  const handleSaveOffline = async () => {
+    const mixItems = items.filter(i => i.type === 'mix');
+    if (mixItems.length === 0) {
+      toast.info('No hay mixes locales para guardar offline');
       return;
     }
+    setOfflineSaving(true);
     try {
-      toast.info(`Descargando ${mixCount} mixes...`);
-      const response = await axios.get(`${API}/playlists/${id}/download`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${playlist.name}.zip`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      toast.success('Descarga completada');
+      const db = await openOfflineDB();
+      let saved = 0;
+      for (const item of mixItems) {
+        if (offlineTracks.includes(item.mix_id)) continue;
+        toast.info(`Guardando offline: ${item.name}...`);
+        const response = await axios.get(`${API}/mixes/${item.mix_id}/audio`, { responseType: 'arraybuffer' });
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction('audio', 'readwrite');
+          const store = tx.objectStore('audio');
+          store.put({ mix_id: item.mix_id, name: item.name, artist: item.artist, audio: response.data, cached_at: Date.now() });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        saved++;
+      }
+      toast.success(`${saved} mixes guardados para reproducción offline`);
+      checkOfflineTracks();
     } catch (err) {
-      toast.error('Error al descargar');
+      toast.error('Error al guardar offline');
+    } finally {
+      setOfflineSaving(false);
     }
   };
 
@@ -292,8 +347,17 @@ export default function PlaylistDetailView() {
           </button>
         )}
         
-        <button onClick={handleDownloadAll} className="text-[#B3B3B3] hover:text-white" data-testid="download-playlist-btn" title="Descargar mixes">
-          <Download size={24} />
+        <button 
+          onClick={handleSaveOffline} 
+          disabled={offlineSaving}
+          className={`text-[#B3B3B3] hover:text-white relative ${offlineSaving ? 'animate-pulse' : ''}`}
+          data-testid="save-offline-btn" 
+          title="Guardar para reproducción offline"
+        >
+          <CloudArrowDown size={24} />
+          {offlineTracks.length > 0 && (
+            <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#1DB954] rounded-full"></span>
+          )}
         </button>
       </div>
 

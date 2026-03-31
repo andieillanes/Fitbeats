@@ -65,6 +65,25 @@ export default function MainLayout() {
     fetchPlaylists();
   }, []);
 
+  // Offline audio cache helpers
+  const getOfflineAudio = async (mixId) => {
+    try {
+      const req = indexedDB.open('fitbeats_offline', 1);
+      return new Promise((resolve) => {
+        req.onsuccess = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('audio')) { resolve(null); return; }
+          const tx = db.transaction('audio', 'readonly');
+          const store = tx.objectStore('audio');
+          const getReq = store.get(mixId);
+          getReq.onsuccess = () => resolve(getReq.result?.audio || null);
+          getReq.onerror = () => resolve(null);
+        };
+        req.onerror = () => resolve(null);
+      });
+    } catch { return null; }
+  };
+
   // Handle track changes - play audio or Spotify
   useEffect(() => {
     const trackId = currentMix?.mix_id || currentMix?.spotify_id;
@@ -96,28 +115,44 @@ export default function MainLayout() {
         }
         setSpotifyPlaying(false);
       } else if (currentMix.external_url) {
-        // No preview available, open in Spotify
         setSpotifyPlaying(false);
       }
       if (currentMix.duration_ms) setDuration(currentMix.duration_ms / 1000);
     } else {
-      // Local mix - pause Spotify
+      // Local mix - pause Spotify and START the audio
       if (spotify?.spotifyPlayer) spotify.pauseSpotify();
       setSpotifyPlaying(false);
+      
+      if (audioRef.current && currentMix.mix_id) {
+        // Try offline cache first, then network
+        getOfflineAudio(currentMix.mix_id).then(cachedAudio => {
+          if (cachedAudio) {
+            const blob = new Blob([cachedAudio], { type: 'audio/mpeg' });
+            const blobUrl = URL.createObjectURL(blob);
+            audioRef.current.src = blobUrl;
+          } else {
+            audioRef.current.src = `${API}/mixes/${currentMix.mix_id}/audio`;
+          }
+          if (isPlaying) {
+            audioRef.current.play().catch(() => setIsPlaying(false));
+          }
+        });
+      }
     }
   }, [currentMix]);
 
-  // Handle play/pause for local audio
+  // Handle play/pause for local audio (only for pause/resume, NOT for track changes)
   useEffect(() => {
-    if (!audioRef.current || isSpotifyTrack && spotifyPlaying) return;
+    if (!audioRef.current) return;
+    if (isSpotifyTrack && spotifyPlaying) return;
     if (isSpotifyTrack && !currentMix?.preview_url) return;
     
     if (isPlaying) {
-      const src = isSpotifyTrack ? currentMix?.preview_url : (currentMix?.mix_id ? `${API}/mixes/${currentMix.mix_id}/audio` : '');
-      if (src && audioRef.current.src !== src) {
-        audioRef.current.src = src;
+      // Only call play if audio is ready (has src and enough data)
+      if (audioRef.current.readyState >= 2 && audioRef.current.paused) {
+        audioRef.current.play().catch(() => {});
       }
-      audioRef.current.play().catch(() => setIsPlaying(false));
+      // If not ready, onCanPlayThrough will handle it
     } else {
       audioRef.current.pause();
     }
@@ -388,14 +423,17 @@ export default function MainLayout() {
           preload="auto"
           onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
           onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
+          onCanPlay={() => {
+            if (isPlaying && audioRef.current.paused) {
+              audioRef.current.play().catch(() => {});
+            }
+          }}
           onCanPlayThrough={() => {
             if (isPlaying && audioRef.current.paused) {
               audioRef.current.play().catch(() => {});
             }
           }}
           onEnded={playNext}
-          crossOrigin={isSpotifyTrack ? undefined : "use-credentials"}
-          src={!isSpotifyTrack && currentMix?.mix_id ? `${API}/mixes/${currentMix.mix_id}/audio` : undefined}
         />
 
         {/* Now Playing */}

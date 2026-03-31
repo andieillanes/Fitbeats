@@ -211,7 +211,18 @@ export default function ClassModeView() {
     setClassPlaying(true);
     setCurrentTrackIdx(0);
     setTrackElapsed(0);
-    playTrackAtIndex(0);
+    // Directly trigger playback
+    const track = tracks[0];
+    if (!track) return;
+    const playable = {
+      ...track,
+      type: track.type,
+      mix_id: track.mix_id,
+      spotify_id: track.spotify_id,
+    };
+    playMix(playable, tracks.map(t => ({
+      ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id
+    })));
   };
 
   const stopClass = () => {
@@ -227,14 +238,20 @@ export default function ClassModeView() {
       const next = currentTrackIdx + 1;
       setCurrentTrackIdx(next);
       setTrackElapsed(0);
-      playTrackAtIndex(next);
+      const track = tracks[next];
+      if (track) {
+        playMix(
+          { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id },
+          tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
+        );
+      }
     } else {
       stopClass();
       toast.success('Clase terminada!');
     }
   };
 
-  const playTrackAtIndex = (idx) => {
+  const playTrackAtIndex = useCallback((idx) => {
     const track = tracks[idx];
     if (!track) return;
     const playable = {
@@ -246,9 +263,16 @@ export default function ClassModeView() {
     playMix(playable, tracks.map(t => ({
       ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id
     })));
-  };
+  }, [tracks, playMix]);
 
-  // Timer for track duration
+  // Use refs for timer to avoid stale closure issues
+  const tracksRef = useRef(tracks);
+  const currentTrackIdxRef = useRef(currentTrackIdx);
+  
+  useEffect(() => { tracksRef.current = tracks; }, [tracks]);
+  useEffect(() => { currentTrackIdxRef.current = currentTrackIdx; }, [currentTrackIdx]);
+
+  // Timer for track duration with auto-advance
   useEffect(() => {
     if (!classPlaying) {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -257,17 +281,27 @@ export default function ClassModeView() {
 
     timerRef.current = setInterval(() => {
       setTrackElapsed(prev => {
-        const currentTrack = tracks[currentTrackIdx];
+        const idx = currentTrackIdxRef.current;
+        const currentTrack = tracksRef.current[idx];
         if (!currentTrack) return prev;
-        const maxDuration = getTrackDuration(currentTrack);
+        const maxDuration = currentTrack.custom_duration || (currentTrack.type === 'spotify' ? Math.floor((currentTrack.original_duration || 0) / 1000) : (currentTrack.original_duration || 240));
+        
         if (prev + 1 >= maxDuration) {
-          // Auto-advance
-          if (currentTrackIdx < tracks.length - 1) {
-            setCurrentTrackIdx(i => i + 1);
-            playTrackAtIndex(currentTrackIdx + 1);
+          // Auto-advance to next track
+          if (idx < tracksRef.current.length - 1) {
+            const nextIdx = idx + 1;
+            setCurrentTrackIdx(nextIdx);
+            const nextTrack = tracksRef.current[nextIdx];
+            if (nextTrack) {
+              playMix(
+                { ...nextTrack, type: nextTrack.type, mix_id: nextTrack.mix_id, spotify_id: nextTrack.spotify_id },
+                tracksRef.current.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
+              );
+            }
             return 0;
           } else {
             setClassPlaying(false);
+            setIsPlaying(false);
             clearInterval(timerRef.current);
             toast.success('Clase terminada!');
             return 0;
@@ -278,7 +312,7 @@ export default function ClassModeView() {
     }, 1000);
 
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [classPlaying, currentTrackIdx, tracks]);
+  }, [classPlaying, playMix, setIsPlaying]);
 
   const isEditing = editSession !== null || tracks.length > 0 || sessionName;
 
@@ -433,14 +467,46 @@ export default function ClassModeView() {
             </div>
           </div>
 
-          {/* Progress bar for class */}
+          {/* Progress bar for class - SEEKABLE */}
           {classPlaying && (
             <div className="mt-3">
-              <div className="w-full bg-[#404040] rounded-full h-1.5">
-                <div 
-                  className="bg-[#1DB954] h-1.5 rounded-full transition-all duration-1000"
-                  style={{ width: `${(trackElapsed / Math.max(getTrackDuration(tracks[currentTrackIdx]), 1)) * 100}%` }}
-                ></div>
+              <input
+                type="range"
+                min="0"
+                max={getTrackDuration(tracks[currentTrackIdx]) || 100}
+                value={trackElapsed}
+                onChange={(e) => {
+                  const newTime = parseFloat(e.target.value);
+                  setTrackElapsed(newTime);
+                }}
+                className="w-full h-1.5 cursor-pointer appearance-none rounded-full"
+                style={{
+                  background: `linear-gradient(to right, #1DB954 ${(trackElapsed / Math.max(getTrackDuration(tracks[currentTrackIdx]), 1)) * 100}%, #404040 ${(trackElapsed / Math.max(getTrackDuration(tracks[currentTrackIdx]), 1)) * 100}%)`
+                }}
+                data-testid="class-progress-bar"
+              />
+              {/* Track timeline showing all tracks */}
+              <div className="flex mt-2 gap-0.5">
+                {tracks.map((t, i) => {
+                  const dur = getTrackDuration(t);
+                  const total = getTotalTime();
+                  const pct = total > 0 ? (dur / total) * 100 : 0;
+                  return (
+                    <div 
+                      key={i} 
+                      className={`h-1 rounded-full cursor-pointer transition-colors ${
+                        i < currentTrackIdx ? 'bg-[#1DB954]' : i === currentTrackIdx ? 'bg-[#1DB954]/50' : 'bg-[#404040]'
+                      }`}
+                      style={{ width: `${pct}%` }}
+                      onClick={() => {
+                        setCurrentTrackIdx(i);
+                        setTrackElapsed(0);
+                        playTrackAtIndex(i);
+                      }}
+                      title={`${t.name} (${formatTime(dur)})`}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}

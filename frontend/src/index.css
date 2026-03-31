@@ -421,3 +421,31 @@ input[type="range"]::-moz-range-thumb {
     padding-bottom: 140px;
   }
 }
+
+
+/* Class mode progress bar */
+input[type="range"][data-testid="class-progress-bar"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  outline: none;
+}
+input[type="range"][data-testid="class-progress-bar"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(0,0,0,0.3);
+}
+input[type="range"][data-testid="class-progress-bar"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  border: none;
+}
