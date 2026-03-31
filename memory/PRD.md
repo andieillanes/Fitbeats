@@ -21,8 +21,17 @@ Plataforma de música tipo Spotify para estudios de fitness. Admin sube mixes, i
 - [x] Con Premium (SDK): reproducción completa vía Web Playback SDK
 - [x] Fix: redirect_uri usa URL pública (no URL interna del cluster)
 - [x] Fix P0: Transfer playback al device_id del Web SDK al inicializar y antes de cada play
+- [x] Fix: SpotifyProvider re-checks conexión cuando el usuario se autentica
+- [x] Fix: getOAuthToken del SDK siempre obtiene tokens frescos via API
 - [x] Endpoint backend PUT /api/spotify/transfer como fallback server-side
 - **NOTA**: Spotify eliminó preview_url. Reproducción completa SOLO con Premium SDK.
+
+### Reproductor / Player Bar
+- [x] Progress bar con requestAnimationFrame para tracking suave
+- [x] getValidDuration() con fallback a metadata del mix si audio element da NaN/0/Infinity
+- [x] Seek funcional (arrastrar barra salta a posición correcta)
+- [x] Timer sincronizado con el audio real
+- [x] CSS custom para range input (barra fina estilo Spotify con thumb hover)
 
 ### Playlists Compartibles
 - [x] Página pública `/shared/{id}`, botón compartir genera URL
