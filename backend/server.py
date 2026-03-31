@@ -1448,7 +1448,6 @@ async def spotify_transfer_playback(request: Request):
     if not device_id:
         raise HTTPException(status_code=400, detail="device_id required")
     
-    # Get fresh token
     token_resp = await get_spotify_user_token(request)
     if not token_resp.get("connected") or not token_resp.get("access_token"):
         raise HTTPException(status_code=401, detail="Spotify not connected")
@@ -1464,6 +1463,67 @@ async def spotify_transfer_playback(request: Request):
         return {"transferred": True}
     logger.warning(f"Spotify transfer failed: {resp.status_code} {resp.text}")
     raise HTTPException(status_code=resp.status_code, detail=f"Transfer failed: {resp.text}")
+
+@api_router.post("/spotify/play")
+async def spotify_play_server_side(request: Request):
+    """Play a Spotify track server-side - finds best available device"""
+    user = await get_current_user(request)
+    body = await request.json()
+    uri = body.get("uri")
+    if not uri:
+        raise HTTPException(status_code=400, detail="uri required")
+    
+    token_resp = await get_spotify_user_token(request)
+    if not token_resp.get("connected") or not token_resp.get("access_token"):
+        raise HTTPException(status_code=401, detail="Spotify not connected")
+    
+    token = token_resp["access_token"]
+    
+    # Find the best device to play on
+    dev_resp = requests.get(
+        f"{SPOTIFY_API_BASE}/me/player/devices",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10
+    )
+    if dev_resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Failed to get devices")
+    
+    devices = dev_resp.json().get("devices", [])
+    if not devices:
+        raise HTTPException(status_code=404, detail="No Spotify devices available. Open Spotify on any device.")
+    
+    # Prefer FitBeats Player, then active, then first
+    target = None
+    for d in devices:
+        if "FitBeats" in d.get("name", ""):
+            target = d
+            break
+    if not target:
+        target = next((d for d in devices if d.get("is_active")), devices[0])
+    
+    # Transfer to target
+    requests.put(
+        f"{SPOTIFY_API_BASE}/me/player",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"device_ids": [target["id"]], "play": False},
+        timeout=10
+    )
+    
+    import time
+    time.sleep(0.5)
+    
+    # Play the track
+    play_resp = requests.put(
+        f"{SPOTIFY_API_BASE}/me/player/play?device_id={target['id']}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"uris": [uri]},
+        timeout=10
+    )
+    if play_resp.status_code in (200, 204):
+        return {"playing": True, "device": target["name"], "device_id": target["id"]}
+    
+    logger.warning(f"Spotify play failed: {play_resp.status_code} {play_resp.text}")
+    raise HTTPException(status_code=play_resp.status_code, detail=f"Play failed: {play_resp.text}")
 
 # ==================== SPOTIFY PLAYLIST IMPORT ====================
 @api_router.get("/spotify/playlists")
@@ -1501,6 +1561,14 @@ async def get_user_spotify_playlists(request: Request, limit: int = 50):
 async def import_spotify_playlist(spotify_playlist_id: str, request: Request):
     """Import a Spotify playlist as a FitBeats playlist with all its tracks"""
     user = await get_current_user(request)
+    
+    # Check if already imported by this user
+    existing = await db.playlists.find_one(
+        {"user_id": user["user_id"], "spotify_source": spotify_playlist_id}, {"_id": 0, "playlist_id": 1}
+    )
+    if existing:
+        return existing  # Return existing playlist instead of creating duplicate
+    
     token_resp = await get_spotify_user_token(request)
     if not token_resp.get("connected") or not token_resp.get("access_token"):
         raise HTTPException(status_code=401, detail="Spotify not connected")

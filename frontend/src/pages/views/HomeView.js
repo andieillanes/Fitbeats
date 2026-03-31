@@ -39,8 +39,17 @@ export default function HomeView() {
     const fetchSpotifyPlaylists = async () => {
       setLoadingSpotify(true);
       try {
-        const res = await axios.get(`${API}/spotify/playlists`);
-        setSpotifyPlaylists(res.data.playlists || []);
+        const [spotifyRes, myRes] = await Promise.all([
+          axios.get(`${API}/spotify/playlists`),
+          axios.get(`${API}/playlists/mine`)
+        ]);
+        setSpotifyPlaylists(spotifyRes.data.playlists || []);
+        // Mark already-imported playlists
+        const alreadyImported = {};
+        (myRes.data || []).forEach(p => {
+          if (p.spotify_source) alreadyImported[p.spotify_source] = p.playlist_id;
+        });
+        setImported(alreadyImported);
       } catch (err) {
         console.error('Failed to fetch Spotify playlists:', err);
       }
@@ -59,11 +68,17 @@ export default function HomeView() {
   };
 
   const importPlaylist = async (spPlaylist) => {
+    // If already imported, navigate to it
+    if (imported[spPlaylist.spotify_playlist_id]) {
+      navigate(`/playlists/${imported[spPlaylist.spotify_playlist_id]}`);
+      return;
+    }
     setImporting(prev => ({ ...prev, [spPlaylist.spotify_playlist_id]: true }));
     try {
       const res = await axios.post(`${API}/spotify/playlists/${spPlaylist.spotify_playlist_id}/import`);
-      setImported(prev => ({ ...prev, [spPlaylist.spotify_playlist_id]: res.data.playlist_id }));
-      toast.success(`"${spPlaylist.name}" importada con ${res.data.items?.length || 0} canciones`);
+      const plId = res.data.playlist_id;
+      setImported(prev => ({ ...prev, [spPlaylist.spotify_playlist_id]: plId }));
+      toast.success(`"${spPlaylist.name}" importada`);
     } catch (err) {
       toast.error('Error al importar: ' + (err.response?.data?.detail || 'intenta de nuevo'));
     }

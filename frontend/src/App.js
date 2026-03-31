@@ -178,18 +178,18 @@ function SpotifyProvider({ children }) {
   // Keep tokenRef in sync
   useEffect(() => { tokenRef.current = spotifyToken; }, [spotifyToken]);
 
-  // Initialize player when SDK ready
+  // Initialize player when SDK ready - only once
   useEffect(() => {
     if (!sdkReady || !spotifyToken || spotifyPlayer) return;
     console.log('[FitBeats] Initializing Spotify Player...');
     const player = new window.Spotify.Player({
       name: 'FitBeats Player',
       getOAuthToken: async (cb) => {
-        // Always fetch a fresh token so the SDK never uses an expired one
         try {
           const res = await axios.get(`${API}/spotify/token`);
           if (res.data.connected && res.data.access_token) {
             tokenRef.current = res.data.access_token;
+            setSpotifyToken(res.data.access_token);
             cb(res.data.access_token);
             return;
           }
@@ -201,7 +201,6 @@ function SpotifyProvider({ children }) {
     player.addListener('ready', async ({ device_id }) => {
       console.log('[FitBeats] Spotify Player ready, device:', device_id);
       setSpotifyDeviceId(device_id);
-      // Critical: Transfer playback to this device so audio routes here
       await transferPlayback(device_id, tokenRef.current);
     });
     player.addListener('not_ready', () => {
@@ -220,7 +219,17 @@ function SpotifyProvider({ children }) {
     player.addListener('account_error', ({ message }) => console.error('[FitBeats] Spotify account error (Premium required):', message));
     player.connect().then(ok => console.log('[FitBeats] Spotify connect:', ok));
     setSpotifyPlayer(player);
-    return () => { player.disconnect(); };
+    // Cleanup on unmount only
+    return () => {
+      player.removeListener('ready');
+      player.removeListener('not_ready');
+      player.removeListener('player_state_changed');
+      player.removeListener('initialization_error');
+      player.removeListener('authentication_error');
+      player.removeListener('account_error');
+      player.disconnect();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdkReady, spotifyToken]);
 
   // Poll position when playing via SDK
@@ -243,12 +252,8 @@ function SpotifyProvider({ children }) {
   }, [spotifyPlayer, spotifyIsPlaying]);
 
   const playSpotifyTrack = async (uri) => {
-    if (!tokenRef.current || !spotifyDeviceId) {
-      console.log('[FitBeats] Cannot play - no token or device. Token:', !!tokenRef.current, 'Device:', spotifyDeviceId);
-      return false;
-    }
     try {
-      // Get fresh token before playing
+      // Get fresh token
       try {
         const res = await axios.get(`${API}/spotify/token`);
         if (res.data.connected && res.data.access_token) {
@@ -258,38 +263,82 @@ function SpotifyProvider({ children }) {
       } catch { /* use existing token */ }
 
       const token = tokenRef.current;
-      console.log('[FitBeats] Playing track:', uri, 'on device:', spotifyDeviceId);
-      // Ensure our device is the active playback device before playing
-      await transferPlayback(spotifyDeviceId, token);
-      // Small delay to let Spotify activate the device
-      await new Promise(resolve => setTimeout(resolve, 300));
-      const resp = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uris: [uri] })
+      if (!token) {
+        console.log('[FitBeats] Cannot play - no token');
+        return false;
+      }
+
+      // Strategy 1: Use SDK device_id if available
+      if (spotifyDeviceId) {
+        console.log('[FitBeats] Trying SDK device:', spotifyDeviceId);
+        await transferPlayback(spotifyDeviceId, token);
+        await new Promise(resolve => setTimeout(resolve, 400));
+        const resp = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uris: [uri] })
+        });
+        if (resp.ok || resp.status === 204) {
+          console.log('[FitBeats] Playing via SDK device');
+          setSpotifyIsPlaying(true);
+          return true;
+        }
+        console.warn('[FitBeats] SDK device play failed:', resp.status);
+      }
+
+      // Strategy 2: Find ANY active device and play on it
+      console.log('[FitBeats] Trying any available device...');
+      const devResp = await fetch('https://api.spotify.com/v1/me/player/devices', {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (!resp.ok) {
-        const err = await resp.text();
-        console.error('[FitBeats] Spotify play error:', resp.status, err);
-        // If 404 (no active device), try transfer + play in one step
-        if (resp.status === 404 || resp.status === 502) {
-          console.log('[FitBeats] Retrying with transfer+play...');
-          await transferPlayback(spotifyDeviceId, token);
+      if (devResp.ok) {
+        const devData = await devResp.json();
+        const devices = devData.devices || [];
+        // Prefer our FitBeats player, then any active, then first available
+        const fitbeats = devices.find(d => d.name === 'FitBeats Player');
+        const active = devices.find(d => d.is_active);
+        const target = fitbeats || active || devices[0];
+        
+        if (target) {
+          console.log('[FitBeats] Using device:', target.name, target.id);
+          // Transfer to target device
+          await fetch('https://api.spotify.com/v1/me/player', {
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_ids: [target.id], play: false })
+          });
           await new Promise(resolve => setTimeout(resolve, 500));
-          const retry = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
+          
+          const playResp = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${target.id}`, {
             method: 'PUT',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ uris: [uri] })
           });
-          if (retry.ok || retry.status === 204) {
+          if (playResp.ok || playResp.status === 204) {
+            console.log('[FitBeats] Playing via device:', target.name);
             setSpotifyIsPlaying(true);
+            // Update our device_id to the working one
+            if (target.name === 'FitBeats Player') {
+              setSpotifyDeviceId(target.id);
+            }
             return true;
           }
+          console.warn('[FitBeats] Fallback play failed:', playResp.status);
         }
-        return false;
       }
-      setSpotifyIsPlaying(true);
-      return true;
+
+      // Strategy 3: Try server-side play as last resort
+      console.log('[FitBeats] Trying server-side play...');
+      try {
+        await axios.post(`${API}/spotify/play`, { uri });
+        setSpotifyIsPlaying(true);
+        return true;
+      } catch (e) {
+        console.warn('[FitBeats] Server-side play failed:', e.response?.status);
+      }
+
+      console.error('[FitBeats] All play strategies failed');
+      return false;
     } catch (e) {
       console.error('[FitBeats] Spotify play exception:', e);
       return false;
