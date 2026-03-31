@@ -1315,7 +1315,7 @@ async def spotify_auth_url(request: Request):
         else:
             frontend_url = request.headers.get('origin', '')
     redirect_uri = f"{frontend_url}/spotify-callback"
-    scopes = "user-read-playback-state user-modify-playback-state user-read-private streaming"
+    scopes = "user-read-playback-state user-modify-playback-state user-read-private streaming playlist-read-private playlist-read-collaborative"
     state = user["user_id"]
     auth_url = (
         f"{SPOTIFY_AUTH_URL}?response_type=code&client_id={SPOTIFY_CLIENT_ID}"
@@ -1435,6 +1435,94 @@ async def spotify_transfer_playback(request: Request):
         return {"transferred": True}
     logger.warning(f"Spotify transfer failed: {resp.status_code} {resp.text}")
     raise HTTPException(status_code=resp.status_code, detail=f"Transfer failed: {resp.text}")
+
+# ==================== SPOTIFY PLAYLIST IMPORT ====================
+@api_router.get("/spotify/playlists")
+async def get_user_spotify_playlists(request: Request, limit: int = 50):
+    """Get the current user's Spotify playlists"""
+    token_resp = await get_spotify_user_token(request)
+    if not token_resp.get("connected") or not token_resp.get("access_token"):
+        raise HTTPException(status_code=401, detail="Spotify not connected. Connect your account in Profile.")
+    
+    token = token_resp["access_token"]
+    resp = requests.get(
+        f"{SPOTIFY_API_BASE}/me/playlists",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"limit": min(limit, 50)},
+        timeout=15
+    )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="Failed to fetch Spotify playlists")
+    
+    data = resp.json()
+    playlists = []
+    for item in data.get("items", []):
+        playlists.append({
+            "spotify_playlist_id": item["id"],
+            "name": item["name"],
+            "description": item.get("description", ""),
+            "image": item["images"][0]["url"] if item.get("images") else None,
+            "track_count": item["tracks"]["total"],
+            "owner": item["owner"]["display_name"],
+            "external_url": item.get("external_urls", {}).get("spotify"),
+        })
+    return {"playlists": playlists, "total": data.get("total", 0)}
+
+@api_router.post("/spotify/playlists/{spotify_playlist_id}/import")
+async def import_spotify_playlist(spotify_playlist_id: str, request: Request):
+    """Import a Spotify playlist as a FitBeats playlist with all its tracks"""
+    user = await get_current_user(request)
+    token_resp = await get_spotify_user_token(request)
+    if not token_resp.get("connected") or not token_resp.get("access_token"):
+        raise HTTPException(status_code=401, detail="Spotify not connected")
+    
+    token = token_resp["access_token"]
+    
+    # Fetch playlist details
+    resp = requests.get(
+        f"{SPOTIFY_API_BASE}/playlists/{spotify_playlist_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"fields": "name,description,images,tracks.items(track(id,name,artists,album,duration_ms,uri,preview_url,external_urls)),tracks.total"},
+        timeout=15
+    )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="Failed to fetch playlist from Spotify")
+    
+    sp_data = resp.json()
+    playlist_name = sp_data.get("name", "Spotify Import")
+    
+    # Create FitBeats playlist
+    playlist_id = f"pl_{uuid.uuid4().hex[:12]}"
+    items = []
+    for entry in sp_data.get("tracks", {}).get("items", []):
+        track = entry.get("track")
+        if not track or not track.get("id"):
+            continue
+        items.append({
+            "type": "spotify",
+            "spotify_id": track["id"],
+            "name": track["name"],
+            "artist": ", ".join(a["name"] for a in track.get("artists", [])),
+            "album": track.get("album", {}).get("name", ""),
+            "album_image": track["album"]["images"][0]["url"] if track.get("album", {}).get("images") else None,
+            "duration_ms": track.get("duration_ms"),
+            "uri": track.get("uri"),
+            "preview_url": track.get("preview_url"),
+        })
+    
+    playlist_doc = {
+        "playlist_id": playlist_id,
+        "name": playlist_name,
+        "user_id": user["user_id"],
+        "items": items,
+        "is_public": False,
+        "spotify_source": spotify_playlist_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.playlists.insert_one(playlist_doc)
+    playlist_doc.pop("_id", None)
+    return playlist_doc
 
 # ==================== PLAYLIST ITEMS (MIXED) ====================
 class PlaylistItemAdd(BaseModel):

@@ -22,6 +22,7 @@ import { Slider } from '../components/ui/slider';
 import { Toaster } from '../components/ui/sonner';
 
 // Sub-pages
+import HomeView from './views/HomeView';
 import AlbumsView from './views/AlbumsView';
 import AlbumDetailView from './views/AlbumDetailView';
 import SongsView from './views/SongsView';
@@ -407,7 +408,7 @@ export default function MainLayout() {
         {/* Page Content */}
         <div className="relative z-[1] px-6 pb-6">
           <Routes>
-            <Route path="/" element={<AlbumsView title="Novedades" />} />
+            <Route path="/" element={<HomeView />} />
             <Route path="/albums" element={<AlbumsView title="Todos los Álbumes" />} />
             <Route path="/albums/:id" element={<AlbumDetailView />} />
             <Route path="/songs" element={<SongsView />} />

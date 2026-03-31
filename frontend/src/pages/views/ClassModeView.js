@@ -61,6 +61,7 @@ export default function ClassModeView() {
   const progressRafRef = useRef(null);
   const transitionRef = useRef(null);
   const savedVolumeRef = useRef(0.8);
+  const advancingRef = useRef(false); // Prevents double-advance race condition
 
   useEffect(() => { fetchSessions(); }, []);
 
@@ -232,6 +233,10 @@ export default function ClassModeView() {
   };
 
   const performTransition = useCallback((fromTrack, toIdx) => {
+    // Guard: prevent double-advance
+    if (advancingRef.current) return;
+    advancingRef.current = true;
+
     const transition = fromTrack?.transition || 'cut';
     const durMs = transitionDuration * 1000;
 
@@ -240,41 +245,48 @@ export default function ClassModeView() {
       setTrackElapsed(0);
       const nextTrack = tracks[toIdx];
       if (nextTrack) {
-        playMix(
-          { ...nextTrack, type: nextTrack.type, mix_id: nextTrack.mix_id, spotify_id: nextTrack.spotify_id },
-          tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
-        );
+        // For Spotify tracks, also pass uri explicitly
+        const trackData = {
+          ...nextTrack,
+          type: nextTrack.type,
+          mix_id: nextTrack.mix_id,
+          spotify_id: nextTrack.spotify_id,
+          uri: nextTrack.uri,
+        };
+        playMix(trackData, tracks.map(t => ({
+          ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri
+        })));
       }
+      // Allow next advance after a delay (audio needs time to load new src)
+      setTimeout(() => { advancingRef.current = false; }, 2000);
     };
 
     switch (transition) {
       case 'fade_out':
-        // Fade out current, then switch at full volume
         savedVolumeRef.current = getVolume();
         fadeVolume(savedVolumeRef.current, 0, durMs, () => {
           switchToNext();
-          setVolume(savedVolumeRef.current);
+          // Restore volume after new track loads
+          setTimeout(() => setVolume(savedVolumeRef.current), 500);
         });
         break;
 
       case 'fade_in':
-        // Switch immediately at 0 volume, then fade in
         savedVolumeRef.current = getVolume();
         setVolume(0);
         switchToNext();
         setTimeout(() => {
           fadeVolume(0, savedVolumeRef.current, durMs);
-        }, 200);
+        }, 500);
         break;
 
       case 'crossfade':
-        // Fade out, switch, fade in (pseudo-crossfade)
         savedVolumeRef.current = getVolume();
         fadeVolume(savedVolumeRef.current, 0, durMs / 2, () => {
           switchToNext();
           setTimeout(() => {
             fadeVolume(0, savedVolumeRef.current, durMs / 2);
-          }, 100);
+          }, 500);
         });
         break;
 
@@ -288,22 +300,26 @@ export default function ClassModeView() {
   // ==================== CLASS PLAYBACK ====================
   const startClass = () => {
     if (tracks.length === 0) return;
+    advancingRef.current = false;
     setClassPlaying(true);
     setCurrentTrackIdx(0);
     setTrackElapsed(0);
     savedVolumeRef.current = getVolume();
     const track = tracks[0];
     if (!track) return;
-    playMix(
-      { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id },
-      tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
-    );
+    const trackData = {
+      ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id, uri: track.uri
+    };
+    playMix(trackData, tracks.map(t => ({
+      ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri
+    })));
   };
 
   const stopClass = () => {
     setClassPlaying(false);
     setCurrentTrackIdx(0);
     setTrackElapsed(0);
+    advancingRef.current = false;
     if (transitionRef.current) { clearInterval(transitionRef.current); transitionRef.current = null; }
     if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = null; }
     setVolume(savedVolumeRef.current || 0.8);
@@ -312,6 +328,7 @@ export default function ClassModeView() {
   };
 
   const skipToNext = () => {
+    advancingRef.current = false; // Reset to allow manual skip
     if (currentTrackIdx < tracks.length - 1) {
       performTransition(tracks[currentTrackIdx], currentTrackIdx + 1);
     } else {
@@ -346,23 +363,33 @@ export default function ClassModeView() {
       let realTime = 0;
 
       // Read from actual audio source
-      if (track.type === 'spotify' && spotify?.spotifyIsPlaying) {
-        realTime = (spotify?.spotifyPosition || 0) / 1000;
+      if (track.type === 'spotify') {
+        // For Spotify, read position from SDK state
+        const pos = spotify?.spotifyPosition;
+        if (pos && pos > 0) {
+          realTime = pos / 1000;
+        }
       } else if (audioRef?.current) {
         realTime = audioRef.current.currentTime || 0;
       }
 
       setTrackElapsed(Math.min(realTime, maxDuration));
 
-      // Auto-advance check: if audio reached near the end
-      const transitionTime = tracksRef.current[idx]?.transition !== 'cut' ? transitionDuration : 0;
-      if (realTime >= maxDuration - transitionTime && !transitionRef.current && maxDuration > 0) {
-        if (idx < tracksRef.current.length - 1) {
-          performTransition(track, idx + 1);
-        } else {
-          setClassPlaying(false);
-          setIsPlaying(false);
-          toast.success('Clase terminada!');
+      // Auto-advance check - only if not already advancing
+      if (!advancingRef.current && maxDuration > 0 && realTime > 0) {
+        const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
+        const triggerPoint = maxDuration - transitionTime;
+
+        if (realTime >= triggerPoint) {
+          if (idx < tracksRef.current.length - 1) {
+            performTransition(track, idx + 1);
+          } else {
+            advancingRef.current = true;
+            setClassPlaying(false);
+            setIsPlaying(false);
+            toast.success('Clase terminada!');
+            setTimeout(() => { advancingRef.current = false; }, 1000);
+          }
         }
       }
 
@@ -587,13 +614,14 @@ export default function ClassModeView() {
                       }`}
                       style={{ width: `${pct}%` }}
                       onClick={() => {
+                        advancingRef.current = false;
                         setCurrentTrackIdx(i);
                         setTrackElapsed(0);
                         const track = tracks[i];
                         if (track) {
                           playMix(
-                            { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id },
-                            tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
+                            { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id, uri: track.uri },
+                            tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri }))
                           );
                         }
                       }}
