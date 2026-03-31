@@ -153,23 +153,23 @@ export default function MainLayout() {
       // Build the Spotify URI if not present
       const uri = currentMix.uri || (currentMix.spotify_id ? `spotify:track:${currentMix.spotify_id}` : null);
       
-      // Try SDK first (Premium users with active device)
-      if (spotify?.spotifyDeviceId && uri) {
-        console.log('[FitBeats] Playing Spotify via SDK:', uri);
+      if (uri && spotify?.spotifyConnected) {
+        // Always try playSpotifyTrack - it has 3 strategies (SDK, any device, server-side)
+        console.log('[FitBeats] Playing Spotify track:', uri);
         spotify.playSpotifyTrack(uri).then(ok => {
           if (ok) {
-            console.log('[FitBeats] Spotify SDK playback started');
+            console.log('[FitBeats] Spotify playback started');
             setSpotifyPlaying(true);
             setSpotifyEmbedId(null);
           } else {
-            console.log('[FitBeats] Spotify SDK failed, falling back to embed');
+            // All strategies failed - show open-in-spotify link
+            console.log('[FitBeats] All Spotify strategies failed, showing open link');
             setSpotifyPlaying(false);
             setSpotifyEmbedId(currentMix.spotify_id);
           }
         });
       } else if (currentMix.spotify_id) {
-        // No SDK device - use embed player
-        console.log('[FitBeats] No SDK device, using embed for:', currentMix.spotify_id);
+        // Not connected - show embed/connect prompt
         setSpotifyPlaying(false);
         setSpotifyEmbedId(currentMix.spotify_id);
       }
@@ -517,35 +517,72 @@ export default function MainLayout() {
           onEnded={playNext}
         />
 
-        {/* Spotify Connection Prompt - when track selected without Premium SDK */}
+        {/* Spotify Playback Prompt */}
         {spotifyEmbedId && (
           <div className="fixed bottom-[80px] left-0 right-0 z-50 flex justify-center px-4 pb-2" data-testid="spotify-embed-container">
             <div className="w-full max-w-[480px] rounded-xl overflow-hidden shadow-2xl shadow-black/60 bg-[#181818] border border-[#282828]">
-              {/* Spotify iframe embed player - actually plays audio when user has Premium */}
-              <iframe
-                src={`https://open.spotify.com/embed/track/${spotifyEmbedId}?utm_source=generator&theme=0`}
-                width="100%"
-                height="152"
-                frameBorder="0"
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                loading="lazy"
-                title="Spotify Player"
-                style={{ borderRadius: '12px' }}
-              />
-              <div className="flex items-center justify-between px-3 py-2 bg-[#181818]">
-                <p className="text-[10px] text-[#B3B3B3]">
-                  {!spotify?.spotifyConnected 
-                    ? 'Conecta Spotify Premium para reproducir completo'
-                    : 'Reproduce desde el player de arriba'
-                  }
-                </p>
-                <button 
-                  onClick={() => { setSpotifyEmbedId(null); setIsPlaying(false); }} 
-                  className="text-[#B3B3B3] hover:text-white"
-                  data-testid="close-spotify-embed"
-                >
-                  <X size={14} />
-                </button>
+              <div className="flex items-center gap-3 p-4">
+                <div className="w-14 h-14 rounded bg-[#282828] overflow-hidden flex-shrink-0">
+                  {currentMix?.album_image ? (
+                    <img src={currentMix.album_image} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center"><SpotifyLogo size={24} className="text-[#1DB954]" /></div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-white truncate">{currentMix?.name}</p>
+                  <p className="text-xs text-[#B3B3B3] truncate">{currentMix?.artist}</p>
+                  {spotify?.spotifyConnected ? (
+                    <p className="text-[10px] text-[#1DB954] mt-1">Abre Spotify para escuchar completa</p>
+                  ) : (
+                    <p className="text-[10px] text-[#ff9800] mt-1">Conecta Spotify Premium en tu Perfil</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {spotify?.spotifyConnected ? (
+                    <a
+                      href={`spotify:track:${spotifyEmbedId}`}
+                      onClick={(e) => {
+                        const uri = `spotify:track:${spotifyEmbedId}`;
+                        axios.post(`${API}/spotify/play`, { uri }).then(res => {
+                          if (res.data?.playing) {
+                            setSpotifyPlaying(true);
+                            setSpotifyEmbedId(null);
+                          }
+                        }).catch(() => {});
+                        setTimeout(() => {
+                          window.open(`https://open.spotify.com/track/${spotifyEmbedId}`, '_blank');
+                        }, 500);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1DB954] text-black font-bold text-sm hover:bg-[#1ed760] transition-colors"
+                      data-testid="open-in-spotify-btn"
+                    >
+                      <SpotifyLogo size={16} weight="fill" />
+                      Abrir
+                    </a>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await axios.get(`${API}/spotify/auth-url`);
+                          window.location.href = res.data.auth_url;
+                        } catch { navigate('/profile'); }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1DB954] text-black font-bold text-sm hover:bg-[#1ed760] transition-colors"
+                      data-testid="connect-spotify-popup-btn"
+                    >
+                      <SpotifyLogo size={16} weight="fill" />
+                      Conectar
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => { setSpotifyEmbedId(null); setIsPlaying(false); }} 
+                    className="text-[#B3B3B3] hover:text-white"
+                    data-testid="close-spotify-embed"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
