@@ -20,6 +20,8 @@ Plataforma de música tipo Spotify para estudios de fitness. Admin sube mixes, i
 - [x] Sin Premium: popup con "Conectar" que inicia OAuth directo
 - [x] Con Premium (SDK): reproducción completa vía Web Playback SDK
 - [x] Fix: redirect_uri usa URL pública (no URL interna del cluster)
+- [x] Fix P0: Transfer playback al device_id del Web SDK al inicializar y antes de cada play
+- [x] Endpoint backend PUT /api/spotify/transfer como fallback server-side
 - **NOTA**: Spotify eliminó preview_url. Reproducción completa SOLO con Premium SDK.
 
 ### Playlists Compartibles
@@ -44,7 +46,7 @@ El usuario debe agregar esta Redirect URI en Spotify Developer Dashboard:
 `https://fitmusic-platform.preview.emergentagent.com/spotify-callback`
 
 ## Backlog
-- [ ] Crossfade real (Web Audio API)
-- [ ] Drag-and-drop reordenar tracks
-- [ ] Estadísticas de uso
-- [ ] Playlists colaborativas
+- [ ] Drag-and-drop reordenar tracks (P1)
+- [ ] Estadísticas de uso por instructor (P2)
+- [ ] Playlists colaborativas (P2)
+- [ ] Crossfade real (Web Audio API) (P2)
