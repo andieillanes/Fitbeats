@@ -16,7 +16,7 @@ export default function LoginPage() {
   // Redirect if already logged in
   React.useEffect(() => {
     if (user) {
-      navigate('/dashboard');
+      navigate('/');
     }
   }, [user, navigate]);
 
@@ -27,7 +27,7 @@ export default function LoginPage() {
 
     try {
       await login(email, password);
-      navigate('/dashboard');
+      navigate('/');
     } catch (err) {
       const detail = err.response?.data?.detail;
       if (Array.isArray(detail)) {
@@ -42,7 +42,7 @@ export default function LoginPage() {
 
   const handleGoogleLogin = () => {
     // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    const redirectUrl = window.location.origin + '/dashboard';
+    const redirectUrl = window.location.origin + '/';
     window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
   };
 

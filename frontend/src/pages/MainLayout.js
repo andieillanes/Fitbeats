@@ -37,13 +37,13 @@ export default function MainLayout() {
   const location = useLocation();
   const { 
     currentMix, queue, isPlaying, currentIndex, shuffle, repeat,
-    playNext, playPrevious, togglePlay, toggleShuffle, toggleRepeat, setIsPlaying
+    playNext, playPrevious, togglePlay, toggleShuffle, toggleRepeat, setIsPlaying,
+    audioRef, setAudioCurrentTime, setAudioDuration
   } = usePlayer();
   const spotify = useSpotify();
   
   const [showQueue, setShowQueue] = useState(true);
   const [playlists, setPlaylists] = useState([]);
-  const audioRef = React.useRef(null);
   const rafRef = React.useRef(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -79,10 +79,15 @@ export default function MainLayout() {
     }
     const update = () => {
       if (audioRef.current && !audioRef.current.paused) {
-        setCurrentTime(audioRef.current.currentTime);
+        const ct = audioRef.current.currentTime;
+        setCurrentTime(ct);
+        setAudioCurrentTime(ct);
         // Also update duration if it becomes available
         const d = audioRef.current.duration;
-        if (d && isFinite(d) && d > 0) setDuration(d);
+        if (d && isFinite(d) && d > 0) {
+          setDuration(d);
+          setAudioDuration(d);
+        }
       }
       rafRef.current = requestAnimationFrame(update);
     };

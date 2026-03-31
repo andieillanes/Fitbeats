@@ -338,6 +338,11 @@ function PlayerProvider({ children }) {
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState(false);
 
+  // Shared audio ref and state for cross-component access (e.g. ClassModeView)
+  const audioRef = React.useRef(null);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+
   const getTrackId = (track) => track?.mix_id || track?.spotify_id || null;
 
   const playMix = (mix, mixList = []) => {
@@ -392,11 +397,27 @@ function PlayerProvider({ children }) {
     setCurrentIndex(0);
   };
 
+  // Volume control for transitions
+  const setVolume = (vol) => {
+    if (audioRef.current) audioRef.current.volume = Math.max(0, Math.min(1, vol));
+  };
+
+  const getVolume = () => audioRef.current?.volume ?? 0.8;
+
+  // Seek the audio element
+  const seekAudio = (timeSec) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = timeSec;
+    }
+  };
+
   return (
     <PlayerContext.Provider value={{
       currentMix, playlist, queue, isPlaying, currentIndex, shuffle, repeat,
       playMix, addToQueue, playNext, playPrevious, togglePlay,
-      toggleShuffle, toggleRepeat, stopPlaying, setIsPlaying
+      toggleShuffle, toggleRepeat, stopPlaying, setIsPlaying,
+      audioRef, audioCurrentTime, setAudioCurrentTime, audioDuration, setAudioDuration,
+      setVolume, getVolume, seekAudio
     }}>
       {children}
     </PlayerContext.Provider>

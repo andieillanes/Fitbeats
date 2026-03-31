@@ -1,29 +1,20 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { usePlayer, API } from '../../App';
+import { usePlayer, useSpotify, API } from '../../App';
 import axios from 'axios';
 import { 
   Play, Pause, Timer, Plus, Trash, MusicNote, SpotifyLogo, 
-  MagnifyingGlass, DotsSixVertical, ArrowsClockwise, X,
-  Lightning, Waveform, Stop, SkipForward
+  MagnifyingGlass, ArrowsClockwise, X, PencilSimple,
+  Lightning, Stop, SkipForward, Check
 } from '@phosphor-icons/react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
-import { Slider } from '../../components/ui/slider';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from '../../components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/select';
 import { toast } from 'sonner';
 
 const TRANSITIONS = [
@@ -35,11 +26,16 @@ const TRANSITIONS = [
 
 export default function ClassModeView() {
   const navigate = useNavigate();
-  const { playMix, currentMix, isPlaying, togglePlay, playNext, setIsPlaying } = usePlayer();
+  const { playMix, currentMix, isPlaying, togglePlay, setIsPlaying, audioRef, audioCurrentTime, setVolume, getVolume } = usePlayer();
+  const spotify = useSpotify();
   
   // Sessions
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // Rename inline
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
   
   // Current session editor
   const [editSession, setEditSession] = useState(null);
@@ -59,21 +55,21 @@ export default function ClassModeView() {
   const [currentTrackIdx, setCurrentTrackIdx] = useState(0);
   const [trackElapsed, setTrackElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
-  const timerRef = useRef(null);
+  const [transitioning, setTransitioning] = useState(false);
+  
+  // Refs for timers and transition
+  const progressRafRef = useRef(null);
+  const transitionRef = useRef(null);
+  const savedVolumeRef = useRef(0.8);
 
-  useEffect(() => {
-    fetchSessions();
-  }, []);
+  useEffect(() => { fetchSessions(); }, []);
 
   const fetchSessions = async () => {
     try {
       const res = await axios.get(`${API}/class-sessions`);
       setSessions(res.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   };
 
   // Search
@@ -96,15 +92,13 @@ export default function ClassModeView() {
   }, [addQuery, addTab, showAddSongs]);
 
   const formatTime = (seconds) => {
-    if (!seconds) return '0:00';
+    if (!seconds || seconds < 0) return '0:00';
     const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
+    const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const getTotalTime = () => {
-    return tracks.reduce((acc, t) => acc + (t.custom_duration || getDefaultDuration(t)), 0);
-  };
+  const getTotalTime = () => tracks.reduce((acc, t) => acc + getTrackDuration(t), 0);
 
   const getDefaultDuration = (track) => {
     if (track.type === 'spotify') return Math.floor((track.original_duration || 0) / 1000);
@@ -113,7 +107,30 @@ export default function ClassModeView() {
 
   const getTrackDuration = (track) => track.custom_duration || getDefaultDuration(track);
 
-  // Create new session
+  // ==================== RENAME ====================
+  const startRename = (e, session) => {
+    e.stopPropagation();
+    setRenamingId(session.session_id);
+    setRenameValue(session.name);
+  };
+
+  const confirmRename = async (e) => {
+    e.stopPropagation();
+    if (!renameValue.trim()) return;
+    try {
+      await axios.put(`${API}/class-sessions/${renamingId}`, { name: renameValue.trim() });
+      toast.success('Nombre actualizado');
+      fetchSessions();
+    } catch { toast.error('Error al renombrar'); }
+    setRenamingId(null);
+  };
+
+  const cancelRename = (e) => {
+    e.stopPropagation();
+    setRenamingId(null);
+  };
+
+  // ==================== SESSION CRUD ====================
   const createNewSession = () => {
     setEditSession(null);
     setSessionName('Nueva clase');
@@ -122,6 +139,7 @@ export default function ClassModeView() {
   };
 
   const openSession = async (session) => {
+    if (renamingId) return;
     setEditSession(session.session_id);
     setSessionName(session.name);
     setTracks(session.tracks || []);
@@ -131,7 +149,6 @@ export default function ClassModeView() {
   const saveSession = async () => {
     if (!sessionName.trim()) return toast.error('Agrega un nombre');
     if (tracks.length === 0) return toast.error('Agrega al menos una canción');
-    
     setSaving(true);
     try {
       const payload = {
@@ -149,28 +166,20 @@ export default function ClassModeView() {
         toast.success('Sesión creada');
       }
       fetchSessions();
-    } catch (err) {
-      toast.error('Error al guardar');
-    } finally {
-      setSaving(false);
-    }
+    } catch { toast.error('Error al guardar'); }
+    finally { setSaving(false); }
   };
 
   const deleteSession = async (id) => {
     try {
       await axios.delete(`${API}/class-sessions/${id}`);
       toast.success('Sesión eliminada');
-      if (editSession === id) {
-        setEditSession(null);
-        setTracks([]);
-      }
+      if (editSession === id) { setEditSession(null); setTracks([]); }
       fetchSessions();
-    } catch (err) {
-      toast.error('Error al eliminar');
-    }
+    } catch { toast.error('Error al eliminar'); }
   };
 
-  // Add track from search
+  // ==================== TRACK MANAGEMENT ====================
   const addTrack = (item, type) => {
     const newTrack = {
       type,
@@ -189,14 +198,8 @@ export default function ClassModeView() {
     toast.success(`"${item.name}" agregado`);
   };
 
-  const removeTrack = (idx) => {
-    setTracks(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  const updateTrack = (idx, field, value) => {
-    setTracks(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
-  };
-
+  const removeTrack = (idx) => setTracks(prev => prev.filter((_, i) => i !== idx));
+  const updateTrack = (idx, field, value) => setTracks(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
   const moveTrack = (idx, dir) => {
     const newIdx = idx + dir;
     if (newIdx < 0 || newIdx >= tracks.length) return;
@@ -205,118 +208,174 @@ export default function ClassModeView() {
     setTracks(newTracks);
   };
 
-  // Class player controls
+  // ==================== TRANSITIONS ====================
+  const fadeVolume = (from, to, durationMs, onDone) => {
+    if (transitionRef.current) clearInterval(transitionRef.current);
+    const steps = 20;
+    const stepTime = durationMs / steps;
+    const stepSize = (to - from) / steps;
+    let current = from;
+    let step = 0;
+    setTransitioning(true);
+    transitionRef.current = setInterval(() => {
+      step++;
+      current += stepSize;
+      setVolume(Math.max(0, Math.min(1, current)));
+      if (step >= steps) {
+        clearInterval(transitionRef.current);
+        transitionRef.current = null;
+        setVolume(to);
+        setTransitioning(false);
+        if (onDone) onDone();
+      }
+    }, stepTime);
+  };
+
+  const performTransition = useCallback((fromTrack, toIdx) => {
+    const transition = fromTrack?.transition || 'cut';
+    const durMs = transitionDuration * 1000;
+
+    const switchToNext = () => {
+      setCurrentTrackIdx(toIdx);
+      setTrackElapsed(0);
+      const nextTrack = tracks[toIdx];
+      if (nextTrack) {
+        playMix(
+          { ...nextTrack, type: nextTrack.type, mix_id: nextTrack.mix_id, spotify_id: nextTrack.spotify_id },
+          tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
+        );
+      }
+    };
+
+    switch (transition) {
+      case 'fade_out':
+        // Fade out current, then switch at full volume
+        savedVolumeRef.current = getVolume();
+        fadeVolume(savedVolumeRef.current, 0, durMs, () => {
+          switchToNext();
+          setVolume(savedVolumeRef.current);
+        });
+        break;
+
+      case 'fade_in':
+        // Switch immediately at 0 volume, then fade in
+        savedVolumeRef.current = getVolume();
+        setVolume(0);
+        switchToNext();
+        setTimeout(() => {
+          fadeVolume(0, savedVolumeRef.current, durMs);
+        }, 200);
+        break;
+
+      case 'crossfade':
+        // Fade out, switch, fade in (pseudo-crossfade)
+        savedVolumeRef.current = getVolume();
+        fadeVolume(savedVolumeRef.current, 0, durMs / 2, () => {
+          switchToNext();
+          setTimeout(() => {
+            fadeVolume(0, savedVolumeRef.current, durMs / 2);
+          }, 100);
+        });
+        break;
+
+      case 'cut':
+      default:
+        switchToNext();
+        break;
+    }
+  }, [tracks, transitionDuration, playMix, setVolume, getVolume]);
+
+  // ==================== CLASS PLAYBACK ====================
   const startClass = () => {
     if (tracks.length === 0) return;
     setClassPlaying(true);
     setCurrentTrackIdx(0);
     setTrackElapsed(0);
-    // Directly trigger playback
+    savedVolumeRef.current = getVolume();
     const track = tracks[0];
     if (!track) return;
-    const playable = {
-      ...track,
-      type: track.type,
-      mix_id: track.mix_id,
-      spotify_id: track.spotify_id,
-    };
-    playMix(playable, tracks.map(t => ({
-      ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id
-    })));
+    playMix(
+      { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id },
+      tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
+    );
   };
 
   const stopClass = () => {
     setClassPlaying(false);
     setCurrentTrackIdx(0);
     setTrackElapsed(0);
-    if (timerRef.current) clearInterval(timerRef.current);
+    if (transitionRef.current) { clearInterval(transitionRef.current); transitionRef.current = null; }
+    if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = null; }
+    setVolume(savedVolumeRef.current || 0.8);
+    setTransitioning(false);
     setIsPlaying(false);
   };
 
   const skipToNext = () => {
     if (currentTrackIdx < tracks.length - 1) {
-      const next = currentTrackIdx + 1;
-      setCurrentTrackIdx(next);
-      setTrackElapsed(0);
-      const track = tracks[next];
-      if (track) {
-        playMix(
-          { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id },
-          tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
-        );
-      }
+      performTransition(tracks[currentTrackIdx], currentTrackIdx + 1);
     } else {
       stopClass();
       toast.success('Clase terminada!');
     }
   };
 
-  const playTrackAtIndex = useCallback((idx) => {
-    const track = tracks[idx];
-    if (!track) return;
-    const playable = {
-      ...track,
-      type: track.type,
-      mix_id: track.mix_id,
-      spotify_id: track.spotify_id,
-    };
-    playMix(playable, tracks.map(t => ({
-      ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id
-    })));
-  }, [tracks, playMix]);
-
-  // Use refs for timer to avoid stale closure issues
+  // Refs for the progress loop
   const tracksRef = useRef(tracks);
   const currentTrackIdxRef = useRef(currentTrackIdx);
-  
+  const classPlayingRef = useRef(classPlaying);
   useEffect(() => { tracksRef.current = tracks; }, [tracks]);
   useEffect(() => { currentTrackIdxRef.current = currentTrackIdx; }, [currentTrackIdx]);
+  useEffect(() => { classPlayingRef.current = classPlaying; }, [classPlaying]);
 
-  // Timer for track duration with auto-advance
+  // Progress sync: read real audio position via rAF
   useEffect(() => {
     if (!classPlaying) {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = null; }
       return;
     }
 
-    timerRef.current = setInterval(() => {
-      setTrackElapsed(prev => {
-        const idx = currentTrackIdxRef.current;
-        const currentTrack = tracksRef.current[idx];
-        if (!currentTrack) return prev;
-        const maxDuration = currentTrack.custom_duration || (currentTrack.type === 'spotify' ? Math.floor((currentTrack.original_duration || 0) / 1000) : (currentTrack.original_duration || 240));
-        
-        if (prev + 1 >= maxDuration) {
-          // Auto-advance to next track
-          if (idx < tracksRef.current.length - 1) {
-            const nextIdx = idx + 1;
-            setCurrentTrackIdx(nextIdx);
-            const nextTrack = tracksRef.current[nextIdx];
-            if (nextTrack) {
-              playMix(
-                { ...nextTrack, type: nextTrack.type, mix_id: nextTrack.mix_id, spotify_id: nextTrack.spotify_id },
-                tracksRef.current.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
-              );
-            }
-            return 0;
-          } else {
-            setClassPlaying(false);
-            setIsPlaying(false);
-            clearInterval(timerRef.current);
-            toast.success('Clase terminada!');
-            return 0;
-          }
-        }
-        return prev + 1;
-      });
-    }, 1000);
+    const update = () => {
+      if (!classPlayingRef.current) return;
 
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [classPlaying, playMix, setIsPlaying]);
+      const idx = currentTrackIdxRef.current;
+      const track = tracksRef.current[idx];
+      if (!track) { progressRafRef.current = requestAnimationFrame(update); return; }
+
+      const maxDuration = getTrackDuration(track);
+      let realTime = 0;
+
+      // Read from actual audio source
+      if (track.type === 'spotify' && spotify?.spotifyIsPlaying) {
+        realTime = (spotify?.spotifyPosition || 0) / 1000;
+      } else if (audioRef?.current) {
+        realTime = audioRef.current.currentTime || 0;
+      }
+
+      setTrackElapsed(Math.min(realTime, maxDuration));
+
+      // Auto-advance check: if audio reached near the end
+      const transitionTime = tracksRef.current[idx]?.transition !== 'cut' ? transitionDuration : 0;
+      if (realTime >= maxDuration - transitionTime && !transitionRef.current && maxDuration > 0) {
+        if (idx < tracksRef.current.length - 1) {
+          performTransition(track, idx + 1);
+        } else {
+          setClassPlaying(false);
+          setIsPlaying(false);
+          toast.success('Clase terminada!');
+        }
+      }
+
+      progressRafRef.current = requestAnimationFrame(update);
+    };
+
+    progressRafRef.current = requestAnimationFrame(update);
+    return () => { if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = null; } };
+  }, [classPlaying, transitionDuration, performTransition]);
 
   const isEditing = editSession !== null || tracks.length > 0 || sessionName;
 
-  // Sessions list view
+  // ==================== SESSIONS LIST VIEW ====================
   if (!isEditing && !editSession) {
     return (
       <div data-testid="class-mode-view">
@@ -354,13 +413,31 @@ export default function ClassModeView() {
               >
                 <div className="flex items-start justify-between">
                   <div className="min-w-0 flex-1">
-                    <h3 className="font-bold text-white truncate">{session.name}</h3>
+                    {renamingId === session.session_id ? (
+                      <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                        <Input
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') confirmRename(e); if (e.key === 'Escape') cancelRename(e); }}
+                          className="bg-[#282828] border-[#404040] text-white h-8 text-sm"
+                          data-testid="rename-class-input"
+                        />
+                        <button onClick={confirmRename} className="text-[#1DB954] hover:text-[#1ed760]"><Check size={16} weight="bold" /></button>
+                        <button onClick={cancelRename} className="text-[#B3B3B3] hover:text-white"><X size={16} /></button>
+                      </div>
+                    ) : (
+                      <h3 className="font-bold text-white truncate">{session.name}</h3>
+                    )}
                     <p className="text-sm text-[#B3B3B3] mt-1">{session.tracks?.length || 0} canciones</p>
                     <p className="text-xs text-[#6A6A6A] mt-1">
                       {session.total_duration ? `${session.total_duration} min` : '--'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={(e) => startRename(e, session)} className="text-[#B3B3B3] hover:text-white" data-testid={`rename-class-${session.session_id}`}>
+                      <PencilSimple size={16} />
+                    </button>
                     <button onClick={(e) => { e.stopPropagation(); deleteSession(session.session_id); }} className="text-[#B3B3B3] hover:text-[#ff6b6b]">
                       <Trash size={16} />
                     </button>
@@ -393,13 +470,13 @@ export default function ClassModeView() {
     );
   }
 
-  // Session editor
+  // ==================== SESSION EDITOR ====================
   return (
     <div data-testid="class-editor">
       {/* Editor Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <button onClick={() => { setEditSession(null); setTracks([]); setSessionName(''); }} className="text-[#B3B3B3] hover:text-white flex-shrink-0">
+          <button onClick={() => { setEditSession(null); setTracks([]); setSessionName(''); stopClass(); }} className="text-[#B3B3B3] hover:text-white flex-shrink-0">
             <X size={20} />
           </button>
           <Input
@@ -430,6 +507,9 @@ export default function ClassModeView() {
                   <button onClick={stopClass} className="w-12 h-12 rounded-full bg-red-500 flex items-center justify-center hover:bg-red-400 transition-colors" data-testid="stop-class-btn">
                     <Stop size={24} weight="fill" className="text-white" />
                   </button>
+                  <button onClick={() => togglePlay()} className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center hover:bg-white/30" data-testid="pause-class-btn">
+                    {isPlaying ? <Pause size={16} weight="fill" className="text-white" /> : <Play size={16} weight="fill" className="text-white ml-0.5" />}
+                  </button>
                   <button onClick={skipToNext} className="text-white hover:text-[#1DB954]" data-testid="skip-next-btn">
                     <SkipForward size={24} weight="fill" />
                   </button>
@@ -446,6 +526,7 @@ export default function ClassModeView() {
                 {classPlaying && (
                   <p className="text-xs text-[#B3B3B3]">
                     Track {currentTrackIdx + 1}/{tracks.length} &bull; {formatTime(trackElapsed)} / {formatTime(getTrackDuration(tracks[currentTrackIdx]))}
+                    {transitioning && <span className="ml-2 text-[#1DB954]">(transición...)</span>}
                   </p>
                 )}
               </div>
@@ -467,17 +548,24 @@ export default function ClassModeView() {
             </div>
           </div>
 
-          {/* Progress bar for class - SEEKABLE */}
+          {/* Progress bar for class - synced with real audio */}
           {classPlaying && (
             <div className="mt-3">
               <input
                 type="range"
                 min="0"
-                max={getTrackDuration(tracks[currentTrackIdx]) || 100}
+                max={getTrackDuration(tracks[currentTrackIdx]) || 1}
+                step="0.1"
                 value={trackElapsed}
                 onChange={(e) => {
                   const newTime = parseFloat(e.target.value);
                   setTrackElapsed(newTime);
+                  // Actually seek the audio
+                  if (tracks[currentTrackIdx]?.type === 'spotify' && spotify?.seekSpotify) {
+                    spotify.seekSpotify(newTime * 1000);
+                  } else if (audioRef?.current) {
+                    audioRef.current.currentTime = newTime;
+                  }
                 }}
                 className="w-full h-1.5 cursor-pointer appearance-none rounded-full"
                 style={{
@@ -494,16 +582,22 @@ export default function ClassModeView() {
                   return (
                     <div 
                       key={i} 
-                      className={`h-1 rounded-full cursor-pointer transition-colors ${
+                      className={`h-1.5 rounded-full cursor-pointer transition-colors ${
                         i < currentTrackIdx ? 'bg-[#1DB954]' : i === currentTrackIdx ? 'bg-[#1DB954]/50' : 'bg-[#404040]'
                       }`}
                       style={{ width: `${pct}%` }}
                       onClick={() => {
                         setCurrentTrackIdx(i);
                         setTrackElapsed(0);
-                        playTrackAtIndex(i);
+                        const track = tracks[i];
+                        if (track) {
+                          playMix(
+                            { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id },
+                            tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id }))
+                          );
+                        }
                       }}
-                      title={`${t.name} (${formatTime(dur)})`}
+                      title={`${t.name} (${formatTime(dur)}) — ${TRANSITIONS.find(tr => tr.value === t.transition)?.label || 'Corte'}`}
                     />
                   );
                 })}
@@ -526,8 +620,8 @@ export default function ClassModeView() {
             {/* Reorder + Cover */}
             <div className="flex items-center gap-3 w-full sm:w-auto">
               <div className="flex flex-col gap-0.5">
-                <button onClick={() => moveTrack(idx, -1)} disabled={idx === 0} className="text-[#6A6A6A] hover:text-white disabled:opacity-20 text-xs">▲</button>
-                <button onClick={() => moveTrack(idx, 1)} disabled={idx === tracks.length - 1} className="text-[#6A6A6A] hover:text-white disabled:opacity-20 text-xs">▼</button>
+                <button onClick={() => moveTrack(idx, -1)} disabled={idx === 0} className="text-[#6A6A6A] hover:text-white disabled:opacity-20 text-xs">&#9650;</button>
+                <button onClick={() => moveTrack(idx, 1)} disabled={idx === tracks.length - 1} className="text-[#6A6A6A] hover:text-white disabled:opacity-20 text-xs">&#9660;</button>
               </div>
               <div className="w-12 h-12 rounded bg-[#282828] overflow-hidden flex-shrink-0">
                 {track.type === 'spotify' && track.album_image ? (
