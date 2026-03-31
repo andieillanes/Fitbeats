@@ -6,8 +6,7 @@ Plataforma de música tipo Spotify para estudios de fitness. Admin sube mixes, i
 ## Stack
 - Backend: FastAPI + MongoDB | Frontend: React + Tailwind + Shadcn/UI + Phosphor Icons
 - Audio: Mutagen + Object Storage + HTTP Range Requests + Disk Cache | Auth: JWT + Google OAuth
-- Spotify: Client Credentials (búsqueda) + Authorization Code (SDK playback + playlist import)
-- Offline: IndexedDB para caché de audio en el navegador
+- Spotify: Client Credentials (búsqueda) + Authorization Code (SDK + server-side playback)
 
 ## Implementado
 
@@ -18,28 +17,18 @@ Plataforma de música tipo Spotify para estudios de fitness. Admin sube mixes, i
 - [x] Caché en disco backend, preload, Cache-Control 24h, IndexedDB paralelo
 
 ### Spotify Integration
-- [x] Búsqueda con tabs, playlists mixtas, Web Playback SDK con transfer playback
-- [x] Importar playlists de Spotify con 1-click desde HomeView
-- [x] Iframe embed real de Spotify como fallback cuando SDK no disponible
-- [x] URI se construye desde spotify_id si falta
+- [x] Búsqueda, playlists mixtas, Web Playback SDK con transfer
+- [x] Importar playlists (1-click, anti-duplicados)
+- [x] playSpotifyTrack con 3 estrategias: SDK device → any device → server-side
+- [x] POST /api/spotify/play server-side (descubre mejor device, transfer + play)
+- [x] Iframe embed Spotify como fallback visual
 
 ### Playlists
-- [x] PlaylistResponse modelo flexible con campos opcionales (items, mix_ids, spotify_source)
-- [x] Vista muestra conteo correcto: items.length + mix_ids.length
-- [x] Cover art de primera canción Spotify como thumbnail
-- [x] SpotifyLogo en playlists importadas
-- [x] Sidebar se refresca al navegar
-- [x] Backwards compatibility: campos faltantes se rellenan automáticamente
+- [x] Modelo flexible, conteo correcto items+mix_ids, cover art Spotify
+- [x] Anti-duplicados en importación, sidebar se refresca al navegar
 
-### Reproductor / Player Bar
-- [x] Progress bar con rAF, getValidDuration(), seek, CSS custom
-
-### Modo Clase
-- [x] Renombrado inline, advancingRef anti-doble-avance
-- [x] Progress bar sincronizada, transiciones Crossfade/Fade Out/Fade In/Cut
-
-### Perfil, UI, Offline
-- [x] Edición, Spotify connect/disconnect, responsive, caché offline IndexedDB
+### Reproductor, Modo Clase, Offline, Perfil, UI
+- [x] rAF progress, seek, transiciones, renombrado inline, responsive, IndexedDB
 
 ## Backlog
 - [ ] Drag-and-drop reordenar tracks (P1)
