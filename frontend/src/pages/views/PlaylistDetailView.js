@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth, usePlayer, API } from '../../App';
 import axios from 'axios';
-import { Play, Pause, Clock, MusicNote, PencilSimple, Trash, Globe, Lock, Share, SpotifyLogo } from '@phosphor-icons/react';
+import { Play, Pause, Clock, MusicNote, PencilSimple, Trash, Globe, Lock, Share, SpotifyLogo, Download } from '@phosphor-icons/react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Switch } from '../../components/ui/switch';
@@ -131,8 +131,32 @@ export default function PlaylistDetailView() {
   };
 
   const handleShare = () => {
-    navigator.clipboard.writeText(window.location.href);
-    toast.success('Enlace copiado');
+    const shareUrl = `${window.location.origin}/shared/${id}`;
+    navigator.clipboard.writeText(shareUrl);
+    toast.success('Enlace de playlist copiado');
+  };
+
+  const handleDownloadAll = async () => {
+    const mixCount = items.filter(i => i.type === 'mix').length;
+    if (mixCount === 0) {
+      toast.info('No hay mixes locales para descargar');
+      return;
+    }
+    try {
+      toast.info(`Descargando ${mixCount} mixes...`);
+      const response = await axios.get(`${API}/playlists/${id}/download`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${playlist.name}.zip`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Descarga completada');
+    } catch (err) {
+      toast.error('Error al descargar');
+    }
   };
 
   if (loading) {
@@ -192,10 +216,14 @@ export default function PlaylistDetailView() {
         )}
         
         {playlist.is_public && (
-          <button onClick={handleShare} className="text-[#B3B3B3] hover:text-white">
+          <button onClick={handleShare} className="text-[#B3B3B3] hover:text-white" data-testid="share-btn">
             <Share size={24} />
           </button>
         )}
+        
+        <button onClick={handleDownloadAll} className="text-[#B3B3B3] hover:text-white" data-testid="download-playlist-btn" title="Descargar mixes locales">
+          <Download size={24} />
+        </button>
       </div>
 
       {/* Track List */}

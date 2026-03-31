@@ -18,6 +18,7 @@ import requests
 import io
 import tempfile
 import base64
+import zipfile
 from mutagen import File as MutagenFile
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3
@@ -1336,6 +1337,100 @@ async def get_playlist_items(playlist_id: str, request: Request):
         await db.playlists.update_one({"playlist_id": playlist_id}, {"$set": {"items": items}})
 
     # Enrich mix items with full data
+    enriched = []
+    for item in items:
+        if item.get("type") == "mix":
+            mix = await db.mixes.find_one({"mix_id": item["mix_id"], "is_active": True}, {"_id": 0})
+            if mix:
+                album = await db.albums.find_one({"album_id": mix.get("album_id")}, {"_id": 0, "name": 1})
+                enriched.append({
+                    "type": "mix",
+                    "mix_id": mix["mix_id"],
+                    "name": mix["name"],
+                    "artist": mix["artist"],
+                    "album_name": album["name"] if album else "",
+                    "duration": mix.get("duration"),
+                    "cover_path": mix.get("cover_path"),
+                    "bpm": mix.get("bpm"),
+                    "genre": mix.get("genre")
+                })
+        elif item.get("type") == "spotify":
+            enriched.append({
+                "type": "spotify",
+                "spotify_id": item["spotify_id"],
+                "name": item.get("name", ""),
+                "artist": item.get("artist", ""),
+                "album": item.get("album", ""),
+                "album_image": item.get("album_image"),
+                "duration_ms": item.get("duration_ms"),
+                "uri": item.get("uri"),
+                "preview_url": item.get("preview_url")
+            })
+    return {"items": enriched}
+
+# ==================== PLAYLIST DOWNLOAD ====================
+@api_router.get("/playlists/{playlist_id}/download")
+async def download_playlist(playlist_id: str, request: Request):
+    """Download all local mixes from a playlist as a zip file"""
+    user = await get_current_user(request)
+    playlist = await db.playlists.find_one({"playlist_id": playlist_id}, {"_id": 0})
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    if not playlist.get("is_public") and playlist["user_id"] != user["user_id"] and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    items = playlist.get("items", [])
+    if not items and playlist.get("mix_ids"):
+        items = [{"type": "mix", "mix_id": mid} for mid in playlist["mix_ids"]]
+
+    # Get only local mixes
+    mix_items = [i for i in items if i.get("type") == "mix"]
+    if not mix_items:
+        raise HTTPException(status_code=400, detail="No hay mixes locales para descargar")
+
+    # Create zip in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for idx, item in enumerate(mix_items):
+            mix = await db.mixes.find_one({"mix_id": item["mix_id"], "is_active": True}, {"_id": 0})
+            if not mix or not mix.get("audio_path"):
+                continue
+            try:
+                data, _ = get_object(mix["audio_path"])
+                ext = mix["audio_path"].split(".")[-1] if "." in mix["audio_path"] else "mp3"
+                filename = f"{idx+1:02d} - {mix['name']} - {mix['artist']}.{ext}".replace("/", "-")
+                zf.writestr(filename, data)
+            except Exception as e:
+                logger.warning(f"Failed to add {mix['name']} to zip: {e}")
+
+    zip_buffer.seek(0)
+    safe_name = playlist["name"].replace("/", "-").replace('"', '')
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'}
+    )
+
+# ==================== PUBLIC PLAYLIST ENDPOINTS (no auth required) ====================
+@api_router.get("/public/playlists/{playlist_id}")
+async def get_public_playlist(playlist_id: str):
+    """Get a public playlist without authentication"""
+    playlist = await db.playlists.find_one({"playlist_id": playlist_id, "is_public": True}, {"_id": 0})
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found or not public")
+    return playlist
+
+@api_router.get("/public/playlists/{playlist_id}/items")
+async def get_public_playlist_items(playlist_id: str):
+    """Get enriched items of a public playlist without auth"""
+    playlist = await db.playlists.find_one({"playlist_id": playlist_id, "is_public": True}, {"_id": 0})
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found or not public")
+
+    items = playlist.get("items", [])
+    if not items and playlist.get("mix_ids"):
+        items = [{"type": "mix", "mix_id": mid} for mid in playlist["mix_ids"]]
+
     enriched = []
     for item in items:
         if item.get("type") == "mix":
