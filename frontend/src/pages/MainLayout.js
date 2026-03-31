@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, useNavigate, useLocation, Link } from 'react-router-dom';
-import { useAuth, usePlayer, API } from '../App';
+import { useAuth, usePlayer, useSpotify, API } from '../App';
 import axios from 'axios';
 import { 
   House, MusicNote, Disc, MicrophoneStage, Clock, 
   MagnifyingGlass, Queue, Heart, Plus, Gear,
   Play, Pause, SkipBack, SkipForward, SpeakerHigh, 
   SpeakerLow, SpeakerX, Shuffle, Repeat, ListPlus,
-  CaretDown, SignOut, X
+  CaretDown, SignOut, X, SpotifyLogo
 } from '@phosphor-icons/react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -37,6 +37,7 @@ export default function MainLayout() {
     currentMix, queue, isPlaying, currentIndex, shuffle, repeat,
     playNext, playPrevious, togglePlay, toggleShuffle, toggleRepeat, setIsPlaying
   } = usePlayer();
+  const spotify = useSpotify();
   
   const [showQueue, setShowQueue] = useState(true);
   const [playlists, setPlaylists] = useState([]);
@@ -45,6 +46,10 @@ export default function MainLayout() {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
+  const [spotifyPlaying, setSpotifyPlaying] = useState(false);
+  const lastTrackRef = React.useRef(null);
+
+  const isSpotifyTrack = currentMix?.type === 'spotify';
 
   useEffect(() => {
     const fetchPlaylists = async () => {
@@ -58,15 +63,73 @@ export default function MainLayout() {
     fetchPlaylists();
   }, []);
 
+  // Handle track changes - play audio or Spotify
   useEffect(() => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.play().catch(() => setIsPlaying(false));
-      } else {
+    const trackId = currentMix?.mix_id || currentMix?.spotify_id;
+    const lastId = lastTrackRef.current;
+    if (trackId === lastId && !currentMix) return;
+    lastTrackRef.current = trackId;
+
+    if (!currentMix) return;
+
+    if (isSpotifyTrack) {
+      // Pause HTML5 audio
+      if (audioRef.current) {
         audioRef.current.pause();
+        audioRef.current.src = '';
       }
+      // Try SDK first, then preview_url
+      if (spotify?.spotifyDeviceId && currentMix.uri) {
+        spotify.playSpotifyTrack(currentMix.uri).then(ok => {
+          if (!ok && currentMix.preview_url) {
+            audioRef.current.src = currentMix.preview_url;
+            audioRef.current.play().catch(() => {});
+          }
+          setSpotifyPlaying(ok);
+        });
+      } else if (currentMix.preview_url) {
+        if (audioRef.current) {
+          audioRef.current.src = currentMix.preview_url;
+          audioRef.current.play().catch(() => setIsPlaying(false));
+        }
+        setSpotifyPlaying(false);
+      } else if (currentMix.external_url) {
+        // No preview available, open in Spotify
+        setSpotifyPlaying(false);
+      }
+      if (currentMix.duration_ms) setDuration(currentMix.duration_ms / 1000);
+    } else {
+      // Local mix - pause Spotify
+      if (spotify?.spotifyPlayer) spotify.pauseSpotify();
+      setSpotifyPlaying(false);
     }
-  }, [isPlaying, currentMix, setIsPlaying]);
+  }, [currentMix]);
+
+  // Handle play/pause for local audio
+  useEffect(() => {
+    if (!audioRef.current || isSpotifyTrack && spotifyPlaying) return;
+    if (isSpotifyTrack && !currentMix?.preview_url) return;
+    
+    if (isPlaying) {
+      const src = isSpotifyTrack ? currentMix?.preview_url : (currentMix?.mix_id ? `${API}/mixes/${currentMix.mix_id}/audio` : '');
+      if (src && audioRef.current.src !== src) {
+        audioRef.current.src = src;
+      }
+      audioRef.current.play().catch(() => setIsPlaying(false));
+    } else {
+      audioRef.current.pause();
+    }
+  }, [isPlaying]);
+
+  // Handle play/pause for Spotify SDK
+  useEffect(() => {
+    if (!isSpotifyTrack || !spotifyPlaying) return;
+    if (isPlaying) {
+      spotify?.resumeSpotify();
+    } else {
+      spotify?.pauseSpotify();
+    }
+  }, [isPlaying, spotifyPlaying]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -260,29 +323,46 @@ export default function MainLayout() {
               </div>
             ) : (
               <div className="space-y-1">
-                {queue.map((mix, idx) => (
-                  <div
-                    key={`${mix.mix_id}-${idx}`}
-                    className={`queue-item ${idx === currentIndex ? 'active' : ''}`}
-                    data-testid={`queue-item-${mix.mix_id}`}
-                  >
-                    <div className="w-10 h-10 rounded bg-[#282828] flex-shrink-0 overflow-hidden">
-                      {mix.cover_path ? (
-                        <img src={`${API}/mixes/${mix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <MusicNote size={16} className="text-[#B3B3B3]" />
+                {queue.map((mix, idx) => {
+                  const isSpotify = mix.type === 'spotify';
+                  const trackKey = isSpotify ? mix.spotify_id : mix.mix_id;
+                  return (
+                    <div
+                      key={`${trackKey}-${idx}`}
+                      className={`queue-item ${idx === currentIndex ? 'active' : ''}`}
+                      data-testid={`queue-item-${trackKey}`}
+                    >
+                      <div className="w-10 h-10 rounded bg-[#282828] flex-shrink-0 overflow-hidden">
+                        {isSpotify ? (
+                          mix.album_image ? (
+                            <img src={mix.album_image_small || mix.album_image} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <SpotifyLogo size={16} className="text-[#1DB954]" />
+                            </div>
+                          )
+                        ) : (
+                          mix.cover_path ? (
+                            <img src={`${API}/mixes/${mix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <MusicNote size={16} className="text-[#B3B3B3]" />
+                            </div>
+                          )
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
+                          <p className={`text-sm font-medium truncate ${idx === currentIndex ? 'text-[#1DB954]' : 'text-white'}`}>
+                            {mix.name}
+                          </p>
+                          {isSpotify && <SpotifyLogo size={10} weight="fill" className="text-[#1DB954] flex-shrink-0" />}
                         </div>
-                      )}
+                        <p className="text-xs text-[#B3B3B3] truncate">{mix.artist}</p>
+                      </div>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-sm font-medium truncate ${idx === currentIndex ? 'text-[#1DB954]' : 'text-white'}`}>
-                        {mix.name}
-                      </p>
-                      <p className="text-xs text-[#B3B3B3] truncate">{mix.artist}</p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -291,40 +371,57 @@ export default function MainLayout() {
 
       {/* Player Bar */}
       <div className="player-bar" data-testid="player-bar">
-        {currentMix && (
-          <audio
-            ref={audioRef}
-            src={`${API}/mixes/${currentMix.mix_id}/audio`}
-            onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
-            onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
-            onEnded={playNext}
-            crossOrigin="use-credentials"
-          />
-        )}
+        <audio
+          ref={audioRef}
+          preload="auto"
+          onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+          onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
+          onCanPlayThrough={() => {
+            if (isPlaying && audioRef.current.paused) {
+              audioRef.current.play().catch(() => {});
+            }
+          }}
+          onEnded={playNext}
+          crossOrigin={isSpotifyTrack ? undefined : "use-credentials"}
+          src={!isSpotifyTrack && currentMix?.mix_id ? `${API}/mixes/${currentMix.mix_id}/audio` : undefined}
+        />
 
         {/* Now Playing */}
-        <div className="flex items-center gap-4 w-[30%] min-w-[180px]">
+        <div className="flex items-center gap-3 w-[30%] min-w-[120px] md:min-w-[180px]">
           {currentMix ? (
             <>
-              <div className="w-14 h-14 rounded bg-[#282828] overflow-hidden flex-shrink-0">
-                {currentMix.cover_path ? (
-                  <img src={`${API}/mixes/${currentMix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
+              <div className="w-12 h-12 md:w-14 md:h-14 rounded bg-[#282828] overflow-hidden flex-shrink-0">
+                {isSpotifyTrack ? (
+                  currentMix.album_image ? (
+                    <img src={currentMix.album_image} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-[#1DB954]/20">
+                      <SpotifyLogo size={20} className="text-[#1DB954]" />
+                    </div>
+                  )
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <MusicNote size={24} className="text-[#B3B3B3]" />
-                  </div>
+                  currentMix.cover_path ? (
+                    <img src={`${API}/mixes/${currentMix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <MusicNote size={20} className="text-[#B3B3B3]" />
+                    </div>
+                  )
                 )}
               </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-white truncate">{currentMix.name}</p>
+              <div className="min-w-0 hidden sm:block">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm font-medium text-white truncate">{currentMix.name}</p>
+                  {isSpotifyTrack && <SpotifyLogo size={12} weight="fill" className="text-[#1DB954] flex-shrink-0" />}
+                </div>
                 <p className="text-xs text-[#B3B3B3] truncate">{currentMix.artist}</p>
               </div>
-              <button className="text-[#B3B3B3] hover:text-white ml-2">
+              <button className="text-[#B3B3B3] hover:text-white ml-2 hidden md:block">
                 <Heart size={16} />
               </button>
             </>
           ) : (
-            <div className="text-[#B3B3B3] text-sm">Selecciona una canción</div>
+            <div className="text-[#B3B3B3] text-sm hidden sm:block">Selecciona una canción</div>
           )}
         </div>
 
@@ -414,13 +511,33 @@ export default function MainLayout() {
             step="0.01"
             value={isMuted ? 0 : volume}
             onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
-            className="w-24 h-1"
+            className="w-24 h-1 hidden sm:block"
             style={{
               background: `linear-gradient(to right, #fff ${(isMuted ? 0 : volume)*100}%, #4d4d4d ${(isMuted ? 0 : volume)*100}%)`
             }}
           />
         </div>
       </div>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="mobile-nav">
+        {navItems.map((item) => (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={`flex flex-col items-center gap-1 px-4 py-2 ${isActive(item.path) ? 'text-white' : 'text-[#B3B3B3]'}`}
+          >
+            <item.icon size={24} weight={isActive(item.path) ? 'fill' : 'regular'} />
+            <span className="text-xs">{item.label}</span>
+          </Link>
+        ))}
+        {user?.role === 'admin' && (
+          <Link to="/admin" className="flex flex-col items-center gap-1 px-4 py-2 text-[#B3B3B3]">
+            <Gear size={24} />
+            <span className="text-xs">Admin</span>
+          </Link>
+        )}
+      </nav>
 
       <Toaster position="top-right" toastOptions={{ style: { background: '#282828', border: 'none', color: '#fff' }}} />
     </div>

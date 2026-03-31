@@ -76,7 +76,10 @@ export default function SongsView() {
 
   const addToPlaylist = async (playlistId, mix) => {
     try {
-      await axios.post(`${API}/playlists/${playlistId}/mixes/${mix.mix_id}`);
+      await axios.post(`${API}/playlists/${playlistId}/items`, {
+        type: 'mix',
+        mix_id: mix.mix_id,
+      });
       toast.success('Agregado a la playlist');
     } catch (err) {
       toast.error('Error al agregar');

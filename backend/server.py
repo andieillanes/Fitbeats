@@ -17,6 +17,7 @@ import jwt
 import requests
 import io
 import tempfile
+import base64
 from mutagen import File as MutagenFile
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3
@@ -42,6 +43,15 @@ STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = "fitbeats"
 storage_key = None
+
+# Spotify Configuration
+SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET")
+SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
+SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
+spotify_client_token = None
+spotify_client_token_expires = None
 
 # Create the main app
 app = FastAPI(title="FitBeats API")
@@ -841,11 +851,50 @@ async def stream_audio(mix_id: str, request: Request, authorization: str = Heade
     if not mix or not mix.get("audio_path"):
         raise HTTPException(status_code=404, detail="Audio not found")
     
+    # Get the full audio data
     data, content_type = get_object(mix["audio_path"])
-    return StreamingResponse(
-        io.BytesIO(data),
+    file_size = len(data)
+    
+    # Check for Range header for faster streaming
+    range_header = request.headers.get("range")
+    
+    if range_header:
+        # Parse range header
+        range_match = range_header.replace("bytes=", "").split("-")
+        start = int(range_match[0]) if range_match[0] else 0
+        end = int(range_match[1]) if range_match[1] else file_size - 1
+        
+        # Ensure valid range
+        start = min(start, file_size - 1)
+        end = min(end, file_size - 1)
+        
+        chunk = data[start:end + 1]
+        
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(len(chunk)),
+            "Content-Type": content_type,
+            "Cache-Control": "public, max-age=3600",
+        }
+        
+        return Response(
+            content=chunk,
+            status_code=206,
+            headers=headers,
+            media_type=content_type
+        )
+    
+    # Full file response with caching headers
+    return Response(
+        content=data,
         media_type=content_type,
-        headers={"Content-Disposition": f"inline; filename={mix['name']}.mp3"}
+        headers={
+            "Content-Length": str(file_size),
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=3600",
+            "Content-Disposition": f"inline; filename={mix['name']}.mp3"
+        }
     )
 
 @api_router.get("/mixes/{mix_id}/download")
@@ -1021,6 +1070,303 @@ async def delete_playlist(playlist_id: str, request: Request):
     await db.playlists.delete_one({"playlist_id": playlist_id})
     return {"message": "Playlist deleted"}
 
+# ==================== SPOTIFY FUNCTIONS ====================
+def get_spotify_client_token():
+    """Get a client credentials token for Spotify API (search, etc.)"""
+    global spotify_client_token, spotify_client_token_expires
+    now = datetime.now(timezone.utc)
+    if spotify_client_token and spotify_client_token_expires and now < spotify_client_token_expires:
+        return spotify_client_token
+
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Spotify credentials not configured")
+
+    auth_str = base64.b64encode(f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()).decode()
+    resp = requests.post(
+        SPOTIFY_TOKEN_URL,
+        headers={"Authorization": f"Basic {auth_str}", "Content-Type": "application/x-www-form-urlencoded"},
+        data={"grant_type": "client_credentials"},
+        timeout=15
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    spotify_client_token = data["access_token"]
+    spotify_client_token_expires = now + timedelta(seconds=data.get("expires_in", 3600) - 60)
+    return spotify_client_token
+
+# ==================== SPOTIFY ENDPOINTS ====================
+@api_router.get("/spotify/search")
+async def spotify_search(q: str, request: Request, limit: int = 20):
+    """Search Spotify tracks using client credentials"""
+    await get_current_user(request)
+    token = get_spotify_client_token()
+    resp = requests.get(
+        f"{SPOTIFY_API_BASE}/search",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"q": q, "type": "track", "limit": min(limit, 50), "market": "US"},
+        timeout=15
+    )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail="Spotify search failed")
+    data = resp.json()
+    tracks = []
+    for item in data.get("tracks", {}).get("items", []):
+        tracks.append({
+            "spotify_id": item["id"],
+            "name": item["name"],
+            "artist": ", ".join(a["name"] for a in item["artists"]),
+            "album": item["album"]["name"],
+            "album_image": item["album"]["images"][0]["url"] if item["album"]["images"] else None,
+            "album_image_small": item["album"]["images"][-1]["url"] if item["album"]["images"] else None,
+            "duration_ms": item["duration_ms"],
+            "uri": item["uri"],
+            "preview_url": item.get("preview_url"),
+            "external_url": item.get("external_urls", {}).get("spotify"),
+            "type": "spotify"
+        })
+    return {"tracks": tracks, "total": data.get("tracks", {}).get("total", 0)}
+
+@api_router.get("/spotify/auth-url")
+async def spotify_auth_url(request: Request):
+    """Get Spotify OAuth URL for user to connect their account (for SDK playback)"""
+    user = await get_current_user(request)
+    if not SPOTIFY_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="Spotify not configured")
+    redirect_uri = f"{request.headers.get('origin', 'https://fitmusic-platform.preview.emergentagent.com')}/spotify-callback"
+    scopes = "user-read-playback-state user-modify-playback-state user-read-private streaming"
+    state = user["user_id"]
+    auth_url = (
+        f"{SPOTIFY_AUTH_URL}?response_type=code&client_id={SPOTIFY_CLIENT_ID}"
+        f"&scope={scopes}&redirect_uri={redirect_uri}&state={state}"
+    )
+    return {"auth_url": auth_url, "redirect_uri": redirect_uri}
+
+@api_router.post("/spotify/callback")
+async def spotify_callback(request: Request):
+    """Exchange Spotify auth code for tokens"""
+    user = await get_current_user(request)
+    body = await request.json()
+    code = body.get("code")
+    redirect_uri = body.get("redirect_uri")
+    if not code:
+        raise HTTPException(status_code=400, detail="Code required")
+
+    auth_str = base64.b64encode(f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()).decode()
+    resp = requests.post(
+        SPOTIFY_TOKEN_URL,
+        headers={"Authorization": f"Basic {auth_str}", "Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri
+        },
+        timeout=15
+    )
+    if resp.status_code != 200:
+        logger.error(f"Spotify token exchange failed: {resp.text}")
+        raise HTTPException(status_code=400, detail="Failed to exchange code")
+
+    token_data = resp.json()
+    # Store tokens for user
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "spotify_access_token": token_data["access_token"],
+            "spotify_refresh_token": token_data.get("refresh_token"),
+            "spotify_token_expires": (datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 3600))).isoformat()
+        }}
+    )
+    return {"connected": True}
+
+@api_router.get("/spotify/token")
+async def get_spotify_user_token(request: Request):
+    """Get current user's Spotify token for Web Playback SDK"""
+    user = await get_current_user(request)
+    user_full = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+
+    if not user_full.get("spotify_access_token"):
+        return {"connected": False, "access_token": None}
+
+    # Check if token expired
+    expires = user_full.get("spotify_token_expires", "")
+    if expires:
+        try:
+            exp_dt = datetime.fromisoformat(expires)
+            if datetime.now(timezone.utc) >= exp_dt:
+                # Refresh the token
+                refresh = user_full.get("spotify_refresh_token")
+                if refresh:
+                    auth_str = base64.b64encode(f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()).decode()
+                    resp = requests.post(
+                        SPOTIFY_TOKEN_URL,
+                        headers={"Authorization": f"Basic {auth_str}", "Content-Type": "application/x-www-form-urlencoded"},
+                        data={"grant_type": "refresh_token", "refresh_token": refresh},
+                        timeout=15
+                    )
+                    if resp.status_code == 200:
+                        td = resp.json()
+                        new_token = td["access_token"]
+                        new_expires = (datetime.now(timezone.utc) + timedelta(seconds=td.get("expires_in", 3600))).isoformat()
+                        await db.users.update_one(
+                            {"user_id": user["user_id"]},
+                            {"$set": {"spotify_access_token": new_token, "spotify_token_expires": new_expires}}
+                        )
+                        return {"connected": True, "access_token": new_token}
+                return {"connected": False, "access_token": None}
+        except Exception:
+            pass
+
+    return {"connected": True, "access_token": user_full["spotify_access_token"]}
+
+@api_router.post("/spotify/disconnect")
+async def spotify_disconnect(request: Request):
+    """Disconnect Spotify account"""
+    user = await get_current_user(request)
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$unset": {"spotify_access_token": "", "spotify_refresh_token": "", "spotify_token_expires": ""}}
+    )
+    return {"disconnected": True}
+
+# ==================== PLAYLIST ITEMS (MIXED) ====================
+class PlaylistItemAdd(BaseModel):
+    type: str  # "mix" or "spotify"
+    mix_id: Optional[str] = None
+    spotify_id: Optional[str] = None
+    name: Optional[str] = None
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    album_image: Optional[str] = None
+    duration_ms: Optional[int] = None
+    uri: Optional[str] = None
+    preview_url: Optional[str] = None
+
+@api_router.post("/playlists/{playlist_id}/items")
+async def add_item_to_playlist(playlist_id: str, item: PlaylistItemAdd, request: Request):
+    """Add a mix or Spotify track to a playlist"""
+    user = await get_current_user(request)
+    playlist = await db.playlists.find_one({"playlist_id": playlist_id}, {"_id": 0})
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    if playlist["user_id"] != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    items = playlist.get("items", [])
+
+    if item.type == "mix":
+        if not item.mix_id:
+            raise HTTPException(status_code=400, detail="mix_id required for mix items")
+        mix = await db.mixes.find_one({"mix_id": item.mix_id, "is_active": True})
+        if not mix:
+            raise HTTPException(status_code=404, detail="Mix not found")
+        new_item = {"type": "mix", "mix_id": item.mix_id}
+        # Avoid duplicates
+        if any(i.get("mix_id") == item.mix_id for i in items):
+            return {"message": "Already in playlist"}
+    elif item.type == "spotify":
+        if not item.spotify_id:
+            raise HTTPException(status_code=400, detail="spotify_id required")
+        new_item = {
+            "type": "spotify",
+            "spotify_id": item.spotify_id,
+            "name": item.name,
+            "artist": item.artist,
+            "album": item.album,
+            "album_image": item.album_image,
+            "duration_ms": item.duration_ms,
+            "uri": item.uri,
+            "preview_url": item.preview_url
+        }
+        if any(i.get("spotify_id") == item.spotify_id for i in items):
+            return {"message": "Already in playlist"}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid item type")
+
+    items.append(new_item)
+    # Also keep mix_ids in sync for backward compat
+    mix_ids = playlist.get("mix_ids", [])
+    if item.type == "mix" and item.mix_id not in mix_ids:
+        mix_ids.append(item.mix_id)
+
+    await db.playlists.update_one(
+        {"playlist_id": playlist_id},
+        {"$set": {"items": items, "mix_ids": mix_ids, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"message": "Item added to playlist"}
+
+@api_router.delete("/playlists/{playlist_id}/items/{item_index}")
+async def remove_item_from_playlist(playlist_id: str, item_index: int, request: Request):
+    """Remove an item from playlist by index"""
+    user = await get_current_user(request)
+    playlist = await db.playlists.find_one({"playlist_id": playlist_id}, {"_id": 0})
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    if playlist["user_id"] != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    items = playlist.get("items", [])
+    if item_index < 0 or item_index >= len(items):
+        raise HTTPException(status_code=400, detail="Invalid item index")
+
+    items.pop(item_index)
+    # Sync mix_ids
+    mix_ids = [i["mix_id"] for i in items if i.get("type") == "mix"]
+
+    await db.playlists.update_one(
+        {"playlist_id": playlist_id},
+        {"$set": {"items": items, "mix_ids": mix_ids, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"message": "Item removed"}
+
+@api_router.get("/playlists/{playlist_id}/items")
+async def get_playlist_items(playlist_id: str, request: Request):
+    """Get enriched playlist items"""
+    user = await get_current_user(request)
+    playlist = await db.playlists.find_one({"playlist_id": playlist_id}, {"_id": 0})
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    if not playlist.get("is_public") and playlist["user_id"] != user["user_id"] and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    items = playlist.get("items", [])
+
+    # If items is empty but mix_ids has data, migrate old format
+    if not items and playlist.get("mix_ids"):
+        items = [{"type": "mix", "mix_id": mid} for mid in playlist["mix_ids"]]
+        await db.playlists.update_one({"playlist_id": playlist_id}, {"$set": {"items": items}})
+
+    # Enrich mix items with full data
+    enriched = []
+    for item in items:
+        if item.get("type") == "mix":
+            mix = await db.mixes.find_one({"mix_id": item["mix_id"], "is_active": True}, {"_id": 0})
+            if mix:
+                album = await db.albums.find_one({"album_id": mix.get("album_id")}, {"_id": 0, "name": 1})
+                enriched.append({
+                    "type": "mix",
+                    "mix_id": mix["mix_id"],
+                    "name": mix["name"],
+                    "artist": mix["artist"],
+                    "album_name": album["name"] if album else "",
+                    "duration": mix.get("duration"),
+                    "cover_path": mix.get("cover_path"),
+                    "bpm": mix.get("bpm"),
+                    "genre": mix.get("genre")
+                })
+        elif item.get("type") == "spotify":
+            enriched.append({
+                "type": "spotify",
+                "spotify_id": item["spotify_id"],
+                "name": item.get("name", ""),
+                "artist": item.get("artist", ""),
+                "album": item.get("album", ""),
+                "album_image": item.get("album_image"),
+                "duration_ms": item.get("duration_ms"),
+                "uri": item.get("uri"),
+                "preview_url": item.get("preview_url")
+            })
+    return {"items": enriched}
+
 # ==================== HEALTH CHECK ====================
 @api_router.get("/")
 async def root():
@@ -1076,11 +1422,11 @@ async def startup():
     # Write test credentials
     os.makedirs("/app/memory", exist_ok=True)
     with open("/app/memory/test_credentials.md", "w") as f:
-        f.write(f"# Test Credentials\n\n")
-        f.write(f"## Admin\n")
+        f.write("# Test Credentials\n\n")
+        f.write("## Admin\n")
         f.write(f"- Email: {admin_email}\n")
         f.write(f"- Password: {admin_password}\n")
-        f.write(f"- Role: admin\n")
+        f.write("- Role: admin\n")
     
     logger.info("FitBeats API started successfully")
 

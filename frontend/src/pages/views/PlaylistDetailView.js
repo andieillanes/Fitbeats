@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth, usePlayer, API } from '../../App';
 import axios from 'axios';
-import { Play, Pause, Clock, MusicNote, PencilSimple, Trash, Globe, Lock, Share } from '@phosphor-icons/react';
+import { Play, Pause, Clock, MusicNote, PencilSimple, Trash, Globe, Lock, Share, SpotifyLogo } from '@phosphor-icons/react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Switch } from '../../components/ui/switch';
@@ -31,11 +31,11 @@ export default function PlaylistDetailView() {
   const { user } = useAuth();
   const { playMix, currentMix, isPlaying, togglePlay } = usePlayer();
   const [playlist, setPlaylist] = useState(null);
-  const [mixes, setMixes] = useState([]);
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showEdit, setShowEdit] = useState(false);
   const [editData, setEditData] = useState({ name: '', description: '', is_public: false });
-  const [deleteTrack, setDeleteTrack] = useState(null);
+  const [deleteItem, setDeleteItem] = useState(null);
 
   useEffect(() => {
     fetchPlaylist();
@@ -43,23 +43,17 @@ export default function PlaylistDetailView() {
 
   const fetchPlaylist = async () => {
     try {
-      const playlistRes = await axios.get(`${API}/playlists/${id}`);
+      const [playlistRes, itemsRes] = await Promise.all([
+        axios.get(`${API}/playlists/${id}`),
+        axios.get(`${API}/playlists/${id}/items`)
+      ]);
       setPlaylist(playlistRes.data);
+      setItems(itemsRes.data.items || []);
       setEditData({
         name: playlistRes.data.name,
         description: playlistRes.data.description || '',
         is_public: playlistRes.data.is_public
       });
-
-      if (playlistRes.data.mix_ids.length > 0) {
-        const mixesRes = await axios.get(`${API}/mixes`);
-        const playlistMixes = playlistRes.data.mix_ids
-          .map(mixId => mixesRes.data.find(m => m.mix_id === mixId))
-          .filter(Boolean);
-        setMixes(playlistMixes);
-      } else {
-        setMixes([]);
-      }
     } catch (err) {
       console.error(err);
       navigate('/playlists');
@@ -68,25 +62,49 @@ export default function PlaylistDetailView() {
     }
   };
 
-  const formatDuration = (seconds) => {
-    if (!seconds) return '--:--';
+  const formatDuration = (val, isMs = false) => {
+    if (!val) return '--:--';
+    const seconds = isMs ? Math.floor(val / 1000) : val;
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const getTotalDuration = () => {
-    const total = mixes.reduce((acc, m) => acc + (m.duration || 0), 0);
+    const total = items.reduce((acc, item) => {
+      if (item.type === 'spotify') return acc + (item.duration_ms || 0) / 1000;
+      return acc + (item.duration || 0);
+    }, 0);
     const mins = Math.floor(total / 60);
     return `${mins} min`;
   };
 
   const isOwner = playlist?.user_id === user?.user_id;
 
+  const getTrackId = (item) => item.mix_id || item.spotify_id;
+  const isCurrentTrack = (item) => {
+    if (!currentMix) return false;
+    return getTrackId(item) === (currentMix.mix_id || currentMix.spotify_id);
+  };
+
   const playAll = () => {
-    if (mixes.length > 0) {
-      playMix(mixes[0], mixes);
+    if (items.length > 0) {
+      const playableItems = items.map(item => {
+        if (item.type === 'spotify') {
+          return { ...item, type: 'spotify' };
+        }
+        return { ...item, type: 'mix' };
+      });
+      playMix(playableItems[0], playableItems);
     }
+  };
+
+  const playItem = (item, idx) => {
+    const playableItems = items.map(i => {
+      if (i.type === 'spotify') return { ...i, type: 'spotify' };
+      return { ...i, type: 'mix' };
+    });
+    playMix(playableItems[idx], playableItems);
   };
 
   const handleSaveEdit = async () => {
@@ -100,12 +118,12 @@ export default function PlaylistDetailView() {
     }
   };
 
-  const handleRemoveTrack = async () => {
-    if (!deleteTrack) return;
+  const handleRemoveItem = async () => {
+    if (deleteItem === null) return;
     try {
-      await axios.delete(`${API}/playlists/${id}/mixes/${deleteTrack.mix_id}`);
+      await axios.delete(`${API}/playlists/${id}/items/${deleteItem.index}`);
       toast.success('Track eliminado');
-      setDeleteTrack(null);
+      setDeleteItem(null);
       fetchPlaylist();
     } catch (err) {
       toast.error('Error al eliminar');
@@ -150,8 +168,8 @@ export default function PlaylistDetailView() {
           )}
           <div className="flex items-center gap-2 text-sm text-white">
             <span className="font-bold">{playlist.user_name}</span>
-            <span className="text-[#B3B3B3]">•</span>
-            <span className="text-[#B3B3B3]">{mixes.length} canciones, {getTotalDuration()}</span>
+            <span className="text-[#B3B3B3]">&bull;</span>
+            <span className="text-[#B3B3B3]">{items.length} canciones, {getTotalDuration()}</span>
           </div>
         </div>
       </div>
@@ -160,7 +178,7 @@ export default function PlaylistDetailView() {
       <div className="flex items-center gap-4 mb-8">
         <button
           onClick={playAll}
-          disabled={mixes.length === 0}
+          disabled={items.length === 0}
           className="w-14 h-14 rounded-full bg-[#1DB954] flex items-center justify-center hover:scale-105 transition-transform disabled:opacity-50"
           data-testid="play-all-btn"
         >
@@ -181,12 +199,12 @@ export default function PlaylistDetailView() {
       </div>
 
       {/* Track List */}
-      {mixes.length === 0 ? (
+      {items.length === 0 ? (
         <div className="text-center py-16">
           <MusicNote size={64} className="mx-auto text-[#535353] mb-4" />
           <p className="text-[#B3B3B3]">Esta playlist está vacía</p>
-          <Button onClick={() => navigate('/songs')} className="mt-4 bg-white/10 hover:bg-white/20 text-white">
-            Agregar canciones
+          <Button onClick={() => navigate('/search')} className="mt-4 bg-white/10 hover:bg-white/20 text-white">
+            Buscar canciones
           </Button>
         </div>
       ) : (
@@ -200,47 +218,62 @@ export default function PlaylistDetailView() {
           </div>
 
           <div className="mt-2">
-            {mixes.map((mix, idx) => {
-              const isCurrentTrack = currentMix?.mix_id === mix.mix_id;
+            {items.map((item, idx) => {
+              const isCurrent = isCurrentTrack(item);
+              const isSpotify = item.type === 'spotify';
               return (
                 <div
-                  key={mix.mix_id}
+                  key={`${getTrackId(item)}-${idx}`}
                   className="grid grid-cols-[16px_4fr_2fr_1fr_40px] gap-4 px-4 py-2 rounded-md group hover:bg-white/10 items-center"
-                  onDoubleClick={() => playMix(mix, mixes)}
+                  onDoubleClick={() => playItem(item, idx)}
+                  data-testid={`playlist-item-${idx}`}
                 >
                   <div className="text-[#B3B3B3] group-hover:hidden">
-                    {isCurrentTrack && isPlaying ? (
-                      <span className="text-[#1DB954] text-xs">▶</span>
+                    {isCurrent && isPlaying ? (
+                      <span className="text-[#1DB954] text-xs">&#9654;</span>
                     ) : (
-                      <span className={isCurrentTrack ? 'text-[#1DB954]' : ''}>{idx + 1}</span>
+                      <span className={isCurrent ? 'text-[#1DB954]' : ''}>{idx + 1}</span>
                     )}
                   </div>
                   <div className="hidden group-hover:block">
-                    <button onClick={() => isCurrentTrack ? togglePlay() : playMix(mix, mixes)}>
-                      {isCurrentTrack && isPlaying ? <Pause size={16} weight="fill" className="text-white" /> : <Play size={16} weight="fill" className="text-white" />}
+                    <button onClick={() => isCurrent ? togglePlay() : playItem(item, idx)}>
+                      {isCurrent && isPlaying ? <Pause size={16} weight="fill" className="text-white" /> : <Play size={16} weight="fill" className="text-white" />}
                     </button>
                   </div>
 
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-10 h-10 rounded bg-[#282828] overflow-hidden flex-shrink-0">
-                      {mix.cover_path ? (
-                        <img src={`${API}/mixes/${mix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
+                      {isSpotify ? (
+                        item.album_image ? (
+                          <img src={item.album_image} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center"><SpotifyLogo size={16} className="text-[#1DB954]" /></div>
+                        )
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center"><MusicNote size={16} className="text-[#535353]" /></div>
+                        item.cover_path ? (
+                          <img src={`${API}/mixes/${item.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center"><MusicNote size={16} className="text-[#535353]" /></div>
+                        )
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className={`font-medium truncate ${isCurrentTrack ? 'text-[#1DB954]' : 'text-white'}`}>{mix.name}</p>
-                      <p className="text-sm text-[#B3B3B3] truncate">{mix.artist}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className={`font-medium truncate ${isCurrent ? 'text-[#1DB954]' : 'text-white'}`}>{item.name}</p>
+                        {isSpotify && <SpotifyLogo size={12} weight="fill" className="text-[#1DB954] flex-shrink-0" />}
+                      </div>
+                      <p className="text-sm text-[#B3B3B3] truncate">{item.artist}</p>
                     </div>
                   </div>
 
-                  <div className="text-sm text-[#B3B3B3] truncate">{mix.album_name || '-'}</div>
-                  <div className="text-sm text-[#B3B3B3] text-right">{formatDuration(mix.duration)}</div>
+                  <div className="text-sm text-[#B3B3B3] truncate">{isSpotify ? item.album : (item.album_name || '-')}</div>
+                  <div className="text-sm text-[#B3B3B3] text-right">
+                    {isSpotify ? formatDuration(item.duration_ms, true) : formatDuration(item.duration)}
+                  </div>
 
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                     {isOwner && (
-                      <button onClick={() => setDeleteTrack(mix)} className="text-[#B3B3B3] hover:text-[#ff6b6b]">
+                      <button onClick={() => setDeleteItem({ index: idx, name: item.name })} className="text-[#B3B3B3] hover:text-[#ff6b6b]">
                         <Trash size={16} />
                       </button>
                     )}
@@ -273,18 +306,18 @@ export default function PlaylistDetailView() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Track Confirmation */}
-      <AlertDialog open={!!deleteTrack} onOpenChange={() => setDeleteTrack(null)}>
+      {/* Delete Item Confirmation */}
+      <AlertDialog open={!!deleteItem} onOpenChange={() => setDeleteItem(null)}>
         <AlertDialogContent className="bg-[#282828] border-0">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-white">¿Eliminar de la playlist?</AlertDialogTitle>
+            <AlertDialogTitle className="text-white">Eliminar de la playlist?</AlertDialogTitle>
             <AlertDialogDescription className="text-[#B3B3B3]">
-              ¿Eliminar "{deleteTrack?.name}" de esta playlist?
+              Eliminar "{deleteItem?.name}" de esta playlist?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="bg-transparent border-0 text-white hover:bg-white/10">Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleRemoveTrack} className="bg-[#ff6b6b] hover:bg-[#ff5252] text-white">Eliminar</AlertDialogAction>
+            <AlertDialogAction onClick={handleRemoveItem} className="bg-[#ff6b6b] hover:bg-[#ff5252] text-white">Eliminar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -343,17 +343,81 @@ input[type="range"]::-moz-range-thumb {
   .queue-sidebar {
     display: none;
   }
+  .sidebar .nav-item span,
+  .sidebar > div:first-child span,
+  .sidebar > div:nth-child(3) {
+    display: none;
+  }
+  .sidebar {
+    padding: 8px;
+  }
+  .sidebar .nav-item {
+    justify-content: center;
+    padding: 12px;
+  }
 }
 
 @media (max-width: 768px) {
   .app-container {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr 60px 56px;
+    grid-template-rows: 1fr 72px;
+    padding: 0;
+    gap: 0;
   }
   .sidebar {
     display: none;
   }
+  .main-content {
+    border-radius: 0;
+    padding-bottom: 80px;
+  }
+  .player-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 72px;
+    padding: 8px 12px;
+    flex-direction: row;
+    justify-content: space-between;
+    z-index: 100;
+  }
+  .queue-sidebar {
+    display: none;
+  }
+  
+  /* Mobile album grid */
+  .album-card {
+    padding: 12px;
+  }
+  .album-card .play-button {
+    width: 40px;
+    height: 40px;
+    bottom: 72px;
+    right: 12px;
+  }
+}
+
+/* Mobile bottom navigation */
+.mobile-nav {
+  display: none;
+  position: fixed;
+  bottom: 72px;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: #000;
+  border-top: 1px solid #282828;
+  z-index: 99;
+}
+
+@media (max-width: 768px) {
   .mobile-nav {
     display: flex;
+    justify-content: space-around;
+    align-items: center;
+  }
+  .main-content {
+    padding-bottom: 140px;
   }
 }
