@@ -1,7 +1,7 @@
-# FitBeats - PRD (Product Requirements Document)
+# FitBeats - PRD
 
 ## Problema Original
-Plataforma de música tipo Spotify enfocada en estudios de fitness ("FitBeats"). Admin sube mixes, instructores crean playlists combinando mixes + Spotify, con reproductor continuo, reproducción offline, playlists compartibles, roles y diseño móvil.
+Plataforma de música tipo Spotify para estudios de fitness. Admin sube mixes, instructores crean playlists combinando mixes + Spotify, con reproductor continuo, reproducción offline, playlists compartibles, roles y diseño móvil.
 
 ## Stack
 - Backend: FastAPI + MongoDB | Frontend: React + Tailwind + Shadcn/UI + Phosphor Icons
@@ -11,52 +11,35 @@ Plataforma de música tipo Spotify enfocada en estudios de fitness ("FitBeats").
 
 ## Implementado
 
-### Core (Completado)
-- [x] Auth JWT + roles (admin, instructor, studio) + Google OAuth
-- [x] CRUD Álbumes, Mixes (batch upload, metadatos auto BPM/duración)
-- [x] Streaming optimizado HTTP Range Requests
-- [x] Panel admin completo
+### Core
+- [x] Auth JWT + roles + Google OAuth, CRUD Álbumes/Mixes/Studios, streaming Range Requests, panel admin
 
-### Spotify Integration (31 Mar 2026)
-- [x] Búsqueda con tabs (Todo/Mixes/Spotify)
-- [x] Playlists mixtas (mixes locales + Spotify tracks)
-- [x] Reproductor unificado con preview_url + SDK Premium
+### Spotify Integration
+- [x] Búsqueda con tabs (Todo/Mixes/Spotify), playlists mixtas
+- [x] Sin Premium: popup con botón "Abrir en Spotify" + link a conectar Premium
+- [x] Con Premium conectado: reproducción completa vía Web Playback SDK
+- **NOTA**: Spotify eliminó preview_url de su API. Reproducción completa SOLO con Premium SDK.
 
-### Playlists Compartibles (31 Mar 2026)
-- [x] Página pública `/shared/{id}` sin autenticación
-- [x] Botón compartir genera URL `/shared/{id}`
+### Playlists Compartibles
+- [x] Página pública `/shared/{id}`, botón compartir genera URL
 
-### Reproducción Offline (31 Mar 2026)
-- [x] Caché de audio en IndexedDB (botón "Guardar offline" en playlists)
-- [x] Reproductor usa caché local primero, luego red
+### Reproducción Offline
+- [x] Caché IndexedDB, botón "Guardar offline" en playlists, reproductor usa caché primero
 
-### Página de Perfil (31 Mar 2026)
-- [x] Edición de nombre, info de cuenta, badge de rol
-- [x] Conectar/desconectar Spotify Premium
+### Perfil
+- [x] Edición nombre, conectar/desconectar Spotify, info cuenta/rol
 
-### Modo Clase (31 Mar 2026)
-- [x] Crear sesiones con secuencia de canciones (mixes + Spotify)
-- [x] Duración personalizada por track (segundos)
-- [x] Tipo de transición: crossfade, corte, fade out, fade in
-- [x] Reproductor clase: start/stop/skip, timer auto-avance
-- [x] Barra de progreso seekable + timeline de tracks clickeable
-- [x] Audio se reproduce correctamente (sync timer + reproductor)
+### Modo Clase
+- [x] Sesiones con secuencia de canciones, duración personalizada por track
+- [x] Transiciones: crossfade, corte, fade out, fade in
+- [x] Reproductor: start/stop/skip, timer auto-avance, barra seekable, timeline clickeable
 
-### UI/UX Mobile (31 Mar 2026)
-- [x] Layout flex responsivo para listas de canciones
-- [x] Agregar canciones desde vista de playlist (dialog con búsqueda)
-
-## DB Schema
-- `users`: user_id, email, password_hash, name, role, studio_id, spotify_*
-- `albums`: album_id, name, artist, year, cover_path, is_active
-- `mixes`: mix_id, name, artist, bpm, duration, genre, album_id, audio_path, cover_path
-- `playlists`: playlist_id, name, description, is_public, user_id, items[], mix_ids
-- `class_sessions`: session_id, name, user_id, tracks[], transition_duration
-- `studios`: studio_id, name, address, phone, is_active
+### UI/UX Mobile
+- [x] Layout flex responsivo, nombres de canciones completos en móvil
+- [x] Columnas álbum/acciones ocultas en pantallas pequeñas
 
 ## Backlog
-- [ ] Crossfade real (Web Audio API) entre tracks en modo clase
+- [ ] Crossfade real (Web Audio API)
 - [ ] Drag-and-drop reordenar tracks
-- [ ] Gestión cuentas Premium Spotify por instructor
 - [ ] Estadísticas de uso
 - [ ] Playlists colaborativas
