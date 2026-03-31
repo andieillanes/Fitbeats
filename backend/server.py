@@ -1257,7 +1257,18 @@ async def spotify_auth_url(request: Request):
     user = await get_current_user(request)
     if not SPOTIFY_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Spotify not configured")
-    redirect_uri = f"{request.headers.get('origin', 'https://fitmusic-platform.preview.emergentagent.com')}/spotify-callback"
+    # Use the public frontend URL for redirect
+    frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    if not frontend_url:
+        # Try to get from Referer header (more reliable than Origin in proxied environments)
+        referer = request.headers.get("referer", "")
+        if referer:
+            from urllib.parse import urlparse
+            parsed = urlparse(referer)
+            frontend_url = f"{parsed.scheme}://{parsed.netloc}"
+        else:
+            frontend_url = request.headers.get('origin', '')
+    redirect_uri = f"{frontend_url}/spotify-callback"
     scopes = "user-read-playback-state user-modify-playback-state user-read-private streaming"
     state = user["user_id"]
     auth_url = (

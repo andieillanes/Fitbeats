@@ -441,7 +441,7 @@ export default function MainLayout() {
           onEnded={playNext}
         />
 
-        {/* Spotify Embed Player (visible, for playback without Premium SDK) */}
+        {/* Spotify Connection Prompt - when track selected without Premium SDK */}
         {spotifyEmbedId && (
           <div className="fixed bottom-[80px] left-0 right-0 z-50 flex justify-center px-4 pb-2" data-testid="spotify-embed-container">
             <div className="w-full max-w-[480px] rounded-xl overflow-hidden shadow-2xl shadow-black/60 bg-[#181818] border border-[#282828]">
@@ -456,12 +456,30 @@ export default function MainLayout() {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold text-white truncate">{currentMix?.name}</p>
                   <p className="text-xs text-[#B3B3B3] truncate">{currentMix?.artist}</p>
-                  <p className="text-[10px] text-[#6A6A6A] mt-1">
-                    <a href="/profile" className="text-[#1DB954] hover:underline">Conecta Spotify Premium</a> para reproducir dentro de FitBeats
-                  </p>
+                  {!spotify?.spotifyConnected ? (
+                    <p className="text-[10px] text-[#ff9800] mt-1 font-medium">
+                      Conecta tu Spotify Premium para reproducir
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-[#1DB954] mt-1">Reproduciendo via Spotify</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  {currentMix?.uri && (
+                  {!spotify?.spotifyConnected ? (
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await axios.get(`${API}/spotify/auth-url`);
+                          window.location.href = res.data.auth_url;
+                        } catch { navigate('/profile'); }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1DB954] text-black font-bold text-sm hover:bg-[#1ed760] transition-colors"
+                      data-testid="connect-spotify-popup-btn"
+                    >
+                      <SpotifyLogo size={16} weight="fill" />
+                      Conectar
+                    </button>
+                  ) : (
                     <a
                       href={`https://open.spotify.com/track/${spotifyEmbedId}`}
                       target="_blank"
@@ -469,7 +487,7 @@ export default function MainLayout() {
                       className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#1DB954] text-black font-bold text-sm hover:bg-[#1ed760] transition-colors"
                       data-testid="open-in-spotify-btn"
                     >
-                      <SpotifyLogo size={18} weight="fill" />
+                      <SpotifyLogo size={16} weight="fill" />
                       Abrir
                     </a>
                   )}
