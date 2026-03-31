@@ -45,6 +45,10 @@ EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = "fitbeats"
 storage_key = None
 
+# Audio file disk cache
+AUDIO_CACHE_DIR = Path("/tmp/fitbeats_audio_cache")
+AUDIO_CACHE_DIR.mkdir(exist_ok=True)
+
 # Spotify Configuration
 SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET")
@@ -100,6 +104,33 @@ def get_object(path: str) -> tuple:
     )
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+def get_cached_audio(audio_path: str) -> tuple:
+    """Get audio from disk cache or download from object storage and cache it"""
+    # Create a safe filename from the path
+    safe_name = audio_path.replace("/", "_").replace("\\", "_")
+    cache_file = AUDIO_CACHE_DIR / safe_name
+    cache_meta = AUDIO_CACHE_DIR / f"{safe_name}.meta"
+
+    # Check disk cache first
+    if cache_file.exists() and cache_meta.exists():
+        content_type = cache_meta.read_text().strip()
+        data = cache_file.read_bytes()
+        return data, content_type
+
+    # Download from object storage
+    data, content_type = get_object(audio_path)
+
+    # Cache to disk (async-safe since we write atomically)
+    try:
+        tmp = cache_file.with_suffix('.tmp')
+        tmp.write_bytes(data)
+        tmp.rename(cache_file)
+        cache_meta.write_text(content_type)
+    except Exception as e:
+        logger.warning(f"Failed to cache audio: {e}")
+
+    return data, content_type
 
 # ==================== AUDIO METADATA EXTRACTION ====================
 def extract_audio_metadata(audio_content: bytes, filename: str) -> dict:
@@ -900,51 +931,66 @@ async def stream_audio(mix_id: str, request: Request, authorization: str = Heade
     if not mix or not mix.get("audio_path"):
         raise HTTPException(status_code=404, detail="Audio not found")
     
-    # Get the full audio data
-    data, content_type = get_object(mix["audio_path"])
+    # Get audio from disk cache (fast) or download + cache (first time only)
+    data, content_type = get_cached_audio(mix["audio_path"])
     file_size = len(data)
     
-    # Check for Range header for faster streaming
+    # Check for Range header for seeking support
     range_header = request.headers.get("range")
     
     if range_header:
-        # Parse range header
         range_match = range_header.replace("bytes=", "").split("-")
         start = int(range_match[0]) if range_match[0] else 0
         end = int(range_match[1]) if range_match[1] else file_size - 1
-        
-        # Ensure valid range
         start = min(start, file_size - 1)
         end = min(end, file_size - 1)
         
         chunk = data[start:end + 1]
         
-        headers = {
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(len(chunk)),
-            "Content-Type": content_type,
-            "Cache-Control": "public, max-age=3600",
-        }
-        
         return Response(
             content=chunk,
             status_code=206,
-            headers=headers,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(chunk)),
+                "Content-Type": content_type,
+                "Cache-Control": "public, max-age=86400",
+            },
             media_type=content_type
         )
     
-    # Full file response with caching headers
+    # Full file response
     return Response(
         content=data,
         media_type=content_type,
         headers={
             "Content-Length": str(file_size),
             "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "public, max-age=86400",
             "Content-Disposition": f"inline; filename={mix['name']}.mp3"
         }
     )
+
+@api_router.post("/mixes/preload")
+async def preload_audio(request: Request):
+    """Warm the disk cache for upcoming tracks (fire-and-forget from frontend)"""
+    await get_current_user(request)
+    body = await request.json()
+    mix_ids = body.get("mix_ids", [])
+    cached = 0
+    for mid in mix_ids[:5]:  # Max 5 at a time
+        mix = await db.mixes.find_one({"mix_id": mid, "is_active": True}, {"_id": 0})
+        if mix and mix.get("audio_path"):
+            safe_name = mix["audio_path"].replace("/", "_").replace("\\", "_")
+            cache_file = AUDIO_CACHE_DIR / safe_name
+            if not cache_file.exists():
+                try:
+                    get_cached_audio(mix["audio_path"])
+                    cached += 1
+                except Exception as e:
+                    logger.warning(f"Preload failed for {mid}: {e}")
+    return {"preloaded": cached}
 
 @api_router.get("/mixes/{mix_id}/download")
 async def download_audio(mix_id: str, request: Request):

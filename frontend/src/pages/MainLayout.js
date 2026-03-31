@@ -138,6 +138,10 @@ export default function MainLayout() {
       return;
     }
 
+    // Reset progress
+    setCurrentTime(0);
+    setAudioCurrentTime(0);
+
     if (isSpotifyTrack) {
       // Pause HTML5 audio
       if (audioRef.current) {
@@ -170,19 +174,36 @@ export default function MainLayout() {
       setSpotifyEmbedId(null);
       
       if (audioRef.current && currentMix.mix_id) {
-        // Try offline cache first, then network
+        // Start loading from network IMMEDIATELY for fast playback
+        audioRef.current.src = `${API}/mixes/${currentMix.mix_id}/audio`;
+        audioRef.current.load();
+        if (isPlaying) {
+          audioRef.current.play().catch(() => {});
+        }
+
+        // Check IndexedDB cache in parallel - if cached, switch to blob (even faster next time)
         getOfflineAudio(currentMix.mix_id).then(cachedAudio => {
-          if (cachedAudio) {
+          if (cachedAudio && audioRef.current && audioRef.current.currentTime < 0.5) {
+            // Only switch to blob if we haven't started playing much yet
             const blob = new Blob([cachedAudio], { type: 'audio/mpeg' });
             const blobUrl = URL.createObjectURL(blob);
+            const wasPlaying = !audioRef.current.paused;
             audioRef.current.src = blobUrl;
-          } else {
-            audioRef.current.src = `${API}/mixes/${currentMix.mix_id}/audio`;
-          }
-          if (isPlaying) {
-            audioRef.current.play().catch(() => {});
+            audioRef.current.load();
+            if (wasPlaying || isPlaying) {
+              audioRef.current.play().catch(() => {});
+            }
           }
         });
+
+        // Preload next tracks in queue (warm the backend disk cache)
+        const nextMixIds = queue
+          .slice(currentIndex + 1, currentIndex + 3)
+          .filter(t => t.type !== 'spotify' && t.mix_id)
+          .map(t => t.mix_id);
+        if (nextMixIds.length > 0) {
+          axios.post(`${API}/mixes/preload`, { mix_ids: nextMixIds }).catch(() => {});
+        }
       }
     }
   }, [currentMix]);
