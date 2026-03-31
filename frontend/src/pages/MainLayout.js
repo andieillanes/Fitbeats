@@ -7,7 +7,7 @@ import {
   MagnifyingGlass, Queue, Heart, Plus, Gear,
   Play, Pause, SkipBack, SkipForward, SpeakerHigh, 
   SpeakerLow, SpeakerX, Shuffle, Repeat, ListPlus,
-  CaretDown, SignOut, X, SpotifyLogo
+  CaretDown, SignOut, X, SpotifyLogo, Lightning
 } from '@phosphor-icons/react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -28,6 +28,8 @@ import SongsView from './views/SongsView';
 import PlaylistsView from './views/PlaylistsView';
 import PlaylistDetailView from './views/PlaylistDetailView';
 import SearchView from './views/SearchView';
+import ProfileView from './views/ProfileView';
+import ClassModeView from './views/ClassModeView';
 
 export default function MainLayout() {
   const { user, logout } = useAuth();
@@ -154,6 +156,7 @@ export default function MainLayout() {
     { path: '/albums', icon: Disc, label: 'Álbumes' },
     { path: '/songs', icon: MusicNote, label: 'Canciones' },
     { path: '/playlists', icon: ListPlus, label: 'Playlists' },
+    { path: '/class-mode', icon: Lightning, label: 'Modo Clase' },
   ];
 
   const isActive = (path) => {
@@ -276,7 +279,14 @@ export default function MainLayout() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="bg-[#282828] border-0 w-52">
-              <DropdownMenuItem className="text-white hover:bg-[#3E3E3E] cursor-pointer">
+              <DropdownMenuItem 
+                onClick={() => navigate('/profile')}
+                className="text-white hover:bg-[#3E3E3E] cursor-pointer"
+                data-testid="nav-profile-menu"
+              >
+                Mi Perfil
+              </DropdownMenuItem>
+              <DropdownMenuItem className="text-white hover:bg-[#3E3E3E] cursor-pointer pointer-events-none">
                 <span className="text-xs text-[#B3B3B3]">{user?.email}</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-[#404040]" />
@@ -302,6 +312,8 @@ export default function MainLayout() {
             <Route path="/playlists" element={<PlaylistsView />} />
             <Route path="/playlists/:id" element={<PlaylistDetailView />} />
             <Route path="/search" element={<SearchView />} />
+            <Route path="/profile" element={<ProfileView />} />
+            <Route path="/class-mode" element={<ClassModeView />} />
           </Routes>
         </div>
       </main>

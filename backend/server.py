@@ -311,6 +311,33 @@ class PlaylistResponse(BaseModel):
     created_at: str
     updated_at: str
 
+# ==================== CLASS MODE MODELS ====================
+class ClassTrackConfig(BaseModel):
+    type: str  # "mix" or "spotify"
+    mix_id: Optional[str] = None
+    spotify_id: Optional[str] = None
+    name: str
+    artist: str
+    album_image: Optional[str] = None
+    uri: Optional[str] = None
+    preview_url: Optional[str] = None
+    original_duration: Optional[int] = None  # seconds for mix, ms for spotify
+    custom_duration: Optional[int] = None  # seconds - custom playback duration
+    transition: str = "crossfade"  # crossfade, cut, fade_out, fade_in
+
+class ClassSessionCreate(BaseModel):
+    name: str
+    playlist_id: Optional[str] = None
+    tracks: List[ClassTrackConfig]
+    total_duration: Optional[int] = None  # total class duration in minutes
+    transition_duration: int = 3  # seconds for transitions
+
+class ClassSessionUpdate(BaseModel):
+    name: Optional[str] = None
+    tracks: Optional[List[ClassTrackConfig]] = None
+    total_duration: Optional[int] = None
+    transition_duration: Optional[int] = None
+
 # ==================== AUTH ENDPOINTS ====================
 @api_router.post("/auth/register")
 async def register(user_data: UserCreate, response: Response):
@@ -419,6 +446,27 @@ async def google_session(request: Request, response: Response):
     user.pop("password_hash", None)
     user.pop("_id", None)
     return user
+
+# ==================== PROFILE ====================
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+
+@api_router.put("/auth/profile")
+async def update_profile(data: ProfileUpdate, request: Request):
+    user = await get_current_user(request)
+    update_fields = {}
+    if data.name is not None and data.name.strip():
+        update_fields["name"] = data.name.strip()
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": update_fields})
+    return {"message": "Profile updated", **update_fields}
+
+@api_router.get("/auth/profile")
+async def get_profile(request: Request):
+    user = await get_current_user(request)
+    user_full = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    return user_full
 
 # ==================== ADMIN ENDPOINTS ====================
 @api_router.post("/admin/instructors", response_model=UserResponse)
@@ -1070,6 +1118,82 @@ async def delete_playlist(playlist_id: str, request: Request):
     
     await db.playlists.delete_one({"playlist_id": playlist_id})
     return {"message": "Playlist deleted"}
+
+# ==================== CLASS MODE ENDPOINTS ====================
+@api_router.post("/class-sessions")
+async def create_class_session(data: ClassSessionCreate, request: Request):
+    user = await get_current_user(request)
+    session_id = f"class_{uuid.uuid4().hex[:12]}"
+    session_doc = {
+        "session_id": session_id,
+        "name": data.name,
+        "user_id": user["user_id"],
+        "user_name": user.get("name", ""),
+        "playlist_id": data.playlist_id,
+        "tracks": [t.dict() for t in data.tracks],
+        "total_duration": data.total_duration,
+        "transition_duration": data.transition_duration,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.class_sessions.insert_one(session_doc)
+    session_doc.pop("_id", None)
+    return session_doc
+
+@api_router.get("/class-sessions")
+async def list_class_sessions(request: Request):
+    user = await get_current_user(request)
+    sessions = await db.class_sessions.find(
+        {"user_id": user["user_id"]},
+        {"_id": 0}
+    ).sort("updated_at", -1).to_list(100)
+    return sessions
+
+@api_router.get("/class-sessions/{session_id}")
+async def get_class_session(session_id: str, request: Request):
+    user = await get_current_user(request)
+    session = await db.class_sessions.find_one(
+        {"session_id": session_id},
+        {"_id": 0}
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session["user_id"] != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    return session
+
+@api_router.put("/class-sessions/{session_id}")
+async def update_class_session(session_id: str, data: ClassSessionUpdate, request: Request):
+    user = await get_current_user(request)
+    session = await db.class_sessions.find_one({"session_id": session_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session["user_id"] != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    update_fields = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if data.name is not None:
+        update_fields["name"] = data.name
+    if data.tracks is not None:
+        update_fields["tracks"] = [t.dict() for t in data.tracks]
+    if data.total_duration is not None:
+        update_fields["total_duration"] = data.total_duration
+    if data.transition_duration is not None:
+        update_fields["transition_duration"] = data.transition_duration
+
+    await db.class_sessions.update_one({"session_id": session_id}, {"$set": update_fields})
+    return {"message": "Session updated"}
+
+@api_router.delete("/class-sessions/{session_id}")
+async def delete_class_session(session_id: str, request: Request):
+    user = await get_current_user(request)
+    session = await db.class_sessions.find_one({"session_id": session_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session["user_id"] != user["user_id"] and user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    await db.class_sessions.delete_one({"session_id": session_id})
+    return {"message": "Session deleted"}
 
 # ==================== SPOTIFY FUNCTIONS ====================
 def get_spotify_client_token():

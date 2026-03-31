@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { usePlayer, API } from '../../App';
 import axios from 'axios';
-import { Play, Pause, Clock, MusicNote, Download, Plus, MagnifyingGlass } from '@phosphor-icons/react';
+import { Play, Pause, Clock, MusicNote, Download, Plus, MagnifyingGlass, SpotifyLogo } from '@phosphor-icons/react';
 import { Input } from '../../components/ui/input';
 import { toast } from 'sonner';
 import {
@@ -96,11 +96,11 @@ export default function SongsView() {
 
   return (
     <div data-testid="songs-view">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-white" style={{ fontFamily: 'Outfit' }}>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
+        <h1 className="text-2xl sm:text-3xl font-bold text-white" style={{ fontFamily: 'Outfit' }}>
           Todas las Canciones
         </h1>
-        <div className="relative w-64">
+        <div className="relative w-full sm:w-64">
           <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B3B3B3]" size={16} />
           <Input
             placeholder="Filtrar canciones..."
@@ -119,8 +119,8 @@ export default function SongsView() {
         </div>
       ) : (
         <div>
-          {/* Header Row */}
-          <div className="grid grid-cols-[16px_4fr_2fr_2fr_1fr_80px] gap-4 px-4 py-2 text-xs uppercase tracking-wider text-[#B3B3B3] border-b border-[#282828]">
+          {/* Header Row - Desktop only */}
+          <div className="hidden sm:grid grid-cols-[16px_4fr_2fr_2fr_1fr_80px] gap-4 px-4 py-2 text-xs uppercase tracking-wider text-[#B3B3B3] border-b border-[#282828]">
             <div>#</div>
             <div>Título</div>
             <div>Álbum</div>
@@ -136,62 +136,68 @@ export default function SongsView() {
               return (
                 <div
                   key={mix.mix_id}
-                  className="grid grid-cols-[16px_4fr_2fr_2fr_1fr_80px] gap-4 px-4 py-2 rounded-md group hover:bg-white/10 items-center"
-                  onDoubleClick={() => playMix(mix, filteredMixes)}
+                  className="flex items-center gap-3 px-3 sm:px-4 py-2.5 rounded-md group hover:bg-white/10 cursor-pointer"
+                  onClick={() => playMix(mix, filteredMixes)}
                   data-testid={`song-row-${mix.mix_id}`}
                 >
-                  <div className="text-[#B3B3B3] group-hover:hidden">
-                    {isCurrentTrack && isPlaying ? (
-                      <span className="text-[#1DB954] text-xs">▶</span>
+                  {/* Number / Play */}
+                  <div className="w-5 flex-shrink-0 text-center text-sm text-[#B3B3B3]">
+                    <span className="group-hover:hidden">
+                      {isCurrentTrack && isPlaying ? (
+                        <span className="text-[#1DB954] text-xs">&#9654;</span>
+                      ) : (
+                        <span className={isCurrentTrack ? 'text-[#1DB954]' : ''}>{idx + 1}</span>
+                      )}
+                    </span>
+                    <span className="hidden group-hover:inline">
+                      {isCurrentTrack && isPlaying ? (
+                        <Pause size={14} weight="fill" className="text-white" />
+                      ) : (
+                        <Play size={14} weight="fill" className="text-white" />
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Cover */}
+                  <div className="w-10 h-10 rounded bg-[#282828] overflow-hidden flex-shrink-0">
+                    {mix.cover_path ? (
+                      <img src={`${API}/mixes/${mix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
                     ) : (
-                      <span className={isCurrentTrack ? 'text-[#1DB954]' : ''}>{idx + 1}</span>
+                      <div className="w-full h-full flex items-center justify-center">
+                        <MusicNote size={16} className="text-[#535353]" />
+                      </div>
                     )}
                   </div>
-                  <div className="hidden group-hover:block">
-                    <button onClick={() => isCurrentTrack ? togglePlay() : playMix(mix, filteredMixes)}>
-                      {isCurrentTrack && isPlaying ? (
-                        <Pause size={16} weight="fill" className="text-white" />
-                      ) : (
-                        <Play size={16} weight="fill" className="text-white" />
-                      )}
-                    </button>
+
+                  {/* Title + Artist (main info - takes remaining space) */}
+                  <div className="min-w-0 flex-1">
+                    <p className={`font-medium truncate text-sm ${isCurrentTrack ? 'text-[#1DB954]' : 'text-white'}`}>
+                      {mix.name}
+                    </p>
+                    <p className="text-xs text-[#B3B3B3] truncate">{mix.artist}</p>
                   </div>
 
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded bg-[#282828] overflow-hidden flex-shrink-0">
-                      {mix.cover_path ? (
-                        <img src={`${API}/mixes/${mix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <MusicNote size={16} className="text-[#535353]" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className={`font-medium truncate ${isCurrentTrack ? 'text-[#1DB954]' : 'text-white'}`}>
-                        {mix.name}
-                      </p>
-                      <p className="text-sm text-[#B3B3B3] truncate">{mix.artist}</p>
-                    </div>
-                  </div>
-
-                  <div className="text-sm text-[#B3B3B3] truncate">
+                  {/* Album - hidden on mobile */}
+                  <div className="hidden sm:block w-[18%] text-sm text-[#B3B3B3] truncate">
                     {mix.album_name || '-'}
                   </div>
 
-                  <div className="text-sm text-[#B3B3B3]">
+                  {/* Genre/BPM - hidden on mobile */}
+                  <div className="hidden md:block w-[15%] text-sm text-[#B3B3B3]">
                     {mix.genre || '-'}
                     {mix.bpm && <span className="ml-2 text-xs text-[#6A6A6A]">{mix.bpm} BPM</span>}
                   </div>
 
-                  <div className="text-sm text-[#B3B3B3] text-right">
+                  {/* Duration */}
+                  <div className="text-sm text-[#B3B3B3] flex-shrink-0 w-12 text-right">
                     {formatDuration(mix.duration)}
                   </div>
 
-                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                  {/* Actions - hidden on mobile, visible on hover desktop */}
+                  <div className="hidden sm:flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <button className="text-[#B3B3B3] hover:text-white">
+                        <button className="text-[#B3B3B3] hover:text-white" onClick={e => e.stopPropagation()}>
                           <Plus size={16} />
                         </button>
                       </DropdownMenuTrigger>
@@ -211,7 +217,7 @@ export default function SongsView() {
                         )}
                       </DropdownMenuContent>
                     </DropdownMenu>
-                    <button onClick={() => handleDownload(mix)} className="text-[#B3B3B3] hover:text-white">
+                    <button onClick={(e) => { e.stopPropagation(); handleDownload(mix); }} className="text-[#B3B3B3] hover:text-white">
                       <Download size={16} />
                     </button>
                   </div>
