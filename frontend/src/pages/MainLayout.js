@@ -561,11 +561,20 @@ export default function MainLayout() {
               <SkipBack size={20} weight="fill" />
             </button>
             <button
-              onClick={togglePlay}
+              onClick={() => {
+                if (isSpotifyTrack && spotifyPlaying) {
+                  if (spotify?.spotifyIsPlaying) {
+                    spotify.pauseSpotify();
+                  } else {
+                    spotify.resumeSpotify();
+                  }
+                }
+                togglePlay();
+              }}
               className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:scale-105 transition-transform"
               data-testid="play-pause-btn"
             >
-              {isPlaying ? (
+              {(isPlaying || (isSpotifyTrack && spotify?.spotifyIsPlaying)) ? (
                 <Pause size={16} weight="fill" className="text-black" />
               ) : (
                 <Play size={16} weight="fill" className="text-black ml-0.5" />
@@ -587,23 +596,35 @@ export default function MainLayout() {
             </button>
           </div>
           <div className="flex items-center gap-2 w-full">
-            <span className="text-xs text-[#B3B3B3] w-10 text-right">{formatTime(currentTime)}</span>
+            <span className="text-xs text-[#B3B3B3] w-10 text-right">
+              {formatTime(isSpotifyTrack && spotifyPlaying ? spotify?.spotifyPosition / 1000 : currentTime)}
+            </span>
             <input
               type="range"
               min="0"
-              max={duration || 100}
-              value={currentTime}
+              max={(isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyDuration || currentMix?.duration_ms || 0) / 1000 : duration) || 100}
+              value={isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyPosition || 0) / 1000 : currentTime}
               onChange={(e) => {
-                if (audioRef.current) {
-                  audioRef.current.currentTime = parseFloat(e.target.value);
+                const val = parseFloat(e.target.value);
+                if (isSpotifyTrack && spotifyPlaying && spotify?.seekSpotify) {
+                  spotify.seekSpotify(val * 1000);
+                } else if (audioRef.current) {
+                  audioRef.current.currentTime = val;
                 }
               }}
               className="flex-1 h-1"
               style={{
-                background: `linear-gradient(to right, #fff ${(currentTime/duration)*100}%, #4d4d4d ${(currentTime/duration)*100}%)`
+                background: (() => {
+                  const pos = isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyPosition || 0) / 1000 : currentTime;
+                  const dur = isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyDuration || currentMix?.duration_ms || 1) / 1000 : (duration || 1);
+                  const pct = (pos / dur) * 100;
+                  return `linear-gradient(to right, #fff ${pct}%, #4d4d4d ${pct}%)`;
+                })()
               }}
             />
-            <span className="text-xs text-[#B3B3B3] w-10">{formatTime(duration)}</span>
+            <span className="text-xs text-[#B3B3B3] w-10">
+              {formatTime(isSpotifyTrack && spotifyPlaying ? (spotify?.spotifyDuration || currentMix?.duration_ms || 0) / 1000 : duration)}
+            </span>
           </div>
         </div>
 

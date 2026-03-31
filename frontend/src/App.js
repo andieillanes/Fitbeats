@@ -103,6 +103,10 @@ function SpotifyProvider({ children }) {
   const [spotifyPlayer, setSpotifyPlayer] = useState(null);
   const [spotifyDeviceId, setSpotifyDeviceId] = useState(null);
   const [sdkReady, setSdkReady] = useState(false);
+  const [spotifyPosition, setSpotifyPosition] = useState(0);
+  const [spotifyDuration, setSpotifyDuration] = useState(0);
+  const [spotifyIsPlaying, setSpotifyIsPlaying] = useState(false);
+  const pollRef = React.useRef(null);
 
   const checkConnection = useCallback(async () => {
     try {
@@ -110,8 +114,14 @@ function SpotifyProvider({ children }) {
       if (res.data.connected && res.data.access_token) {
         setSpotifyToken(res.data.access_token);
         setSpotifyConnected(true);
+        return true;
       }
-    } catch { /* not connected */ }
+      setSpotifyConnected(false);
+      return false;
+    } catch {
+      setSpotifyConnected(false);
+      return false;
+    }
   }, []);
 
   useEffect(() => { checkConnection(); }, [checkConnection]);
@@ -119,8 +129,10 @@ function SpotifyProvider({ children }) {
   // Load Spotify SDK when token is available
   useEffect(() => {
     if (!spotifyToken) return;
-    if (document.getElementById('spotify-sdk-script')) return;
-
+    if (document.getElementById('spotify-sdk-script')) {
+      if (window.Spotify) setSdkReady(true);
+      return;
+    }
     window.onSpotifyWebPlaybackSDKReady = () => setSdkReady(true);
     const script = document.createElement('script');
     script.id = 'spotify-sdk-script';
@@ -132,44 +144,105 @@ function SpotifyProvider({ children }) {
   // Initialize player when SDK ready
   useEffect(() => {
     if (!sdkReady || !spotifyToken || spotifyPlayer) return;
+    console.log('[FitBeats] Initializing Spotify Player...');
     const player = new window.Spotify.Player({
       name: 'FitBeats Player',
       getOAuthToken: cb => cb(spotifyToken),
       volume: 0.8
     });
     player.addListener('ready', ({ device_id }) => {
+      console.log('[FitBeats] Spotify Player ready, device:', device_id);
       setSpotifyDeviceId(device_id);
     });
-    player.addListener('not_ready', () => setSpotifyDeviceId(null));
-    player.connect();
+    player.addListener('not_ready', () => {
+      console.log('[FitBeats] Spotify Player not ready');
+      setSpotifyDeviceId(null);
+    });
+    player.addListener('player_state_changed', (state) => {
+      if (state) {
+        setSpotifyIsPlaying(!state.paused);
+        setSpotifyPosition(state.position);
+        setSpotifyDuration(state.duration);
+      }
+    });
+    player.addListener('initialization_error', ({ message }) => console.error('[FitBeats] Spotify init error:', message));
+    player.addListener('authentication_error', ({ message }) => console.error('[FitBeats] Spotify auth error:', message));
+    player.addListener('account_error', ({ message }) => console.error('[FitBeats] Spotify account error:', message));
+    player.connect().then(ok => console.log('[FitBeats] Spotify connect:', ok));
     setSpotifyPlayer(player);
     return () => { player.disconnect(); };
   }, [sdkReady, spotifyToken]);
 
+  // Poll position when playing via SDK
+  useEffect(() => {
+    if (!spotifyPlayer || !spotifyIsPlaying) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+    pollRef.current = setInterval(async () => {
+      try {
+        const state = await spotifyPlayer.getCurrentState();
+        if (state) {
+          setSpotifyPosition(state.position);
+          setSpotifyDuration(state.duration);
+          setSpotifyIsPlaying(!state.paused);
+        }
+      } catch { /* ignore */ }
+    }, 1000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [spotifyPlayer, spotifyIsPlaying]);
+
   const playSpotifyTrack = async (uri) => {
-    if (!spotifyToken || !spotifyDeviceId) return false;
+    if (!spotifyToken || !spotifyDeviceId) {
+      console.log('[FitBeats] Cannot play - no token or device. Token:', !!spotifyToken, 'Device:', spotifyDeviceId);
+      return false;
+    }
     try {
-      await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
+      console.log('[FitBeats] Playing track:', uri, 'on device:', spotifyDeviceId);
+      const resp = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${spotifyToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ uris: [uri] })
       });
+      if (!resp.ok) {
+        const err = await resp.text();
+        console.error('[FitBeats] Spotify play error:', resp.status, err);
+        return false;
+      }
+      setSpotifyIsPlaying(true);
       return true;
-    } catch { return false; }
+    } catch (e) {
+      console.error('[FitBeats] Spotify play exception:', e);
+      return false;
+    }
   };
 
   const pauseSpotify = async () => {
-    if (spotifyPlayer) spotifyPlayer.pause();
+    if (spotifyPlayer) {
+      await spotifyPlayer.pause();
+      setSpotifyIsPlaying(false);
+    }
   };
 
   const resumeSpotify = async () => {
-    if (spotifyPlayer) spotifyPlayer.resume();
+    if (spotifyPlayer) {
+      await spotifyPlayer.resume();
+      setSpotifyIsPlaying(true);
+    }
+  };
+
+  const seekSpotify = async (positionMs) => {
+    if (spotifyPlayer) {
+      await spotifyPlayer.seek(positionMs);
+      setSpotifyPosition(positionMs);
+    }
   };
 
   return (
     <SpotifyContext.Provider value={{
       spotifyToken, spotifyConnected, spotifyDeviceId, spotifyPlayer,
-      playSpotifyTrack, pauseSpotify, resumeSpotify, checkConnection
+      spotifyPosition, spotifyDuration, spotifyIsPlaying,
+      playSpotifyTrack, pauseSpotify, resumeSpotify, seekSpotify, checkConnection
     }}>
       {children}
     </SpotifyContext.Provider>
