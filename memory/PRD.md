@@ -12,41 +12,34 @@ Plataforma de música tipo Spotify para estudios de fitness. Admin sube mixes, i
 ## Implementado
 
 ### Core
-- [x] Auth JWT + roles + Google OAuth, CRUD Álbumes/Mixes/Studios, streaming Range Requests, panel admin
+- [x] Auth JWT + roles + Google OAuth, CRUD Álbumes/Mixes/Studios, streaming, panel admin
 
 ### Audio Performance
-- [x] Caché en disco backend, POST /api/mixes/preload, Cache-Control 24h
-- [x] Frontend reproduce inmediatamente desde red, IndexedDB check en paralelo, precarga
+- [x] Caché en disco backend, preload, Cache-Control 24h, IndexedDB paralelo
 
 ### Spotify Integration
 - [x] Búsqueda con tabs, playlists mixtas, Web Playback SDK con transfer playback
-- [x] Importar playlists de Spotify: GET /api/spotify/playlists + POST /api/spotify/playlists/{id}/import
-- [x] OAuth scopes: playlist-read-private, playlist-read-collaborative
-- [x] HomeView con grid de playlists Spotify importables (1-click)
-- [x] Banner "Conecta tu Spotify" cuando no está conectado
+- [x] Importar playlists de Spotify con 1-click desde HomeView
 - [x] Iframe embed real de Spotify como fallback cuando SDK no disponible
 - [x] URI se construye desde spotify_id si falta
+
+### Playlists
+- [x] PlaylistResponse modelo flexible con campos opcionales (items, mix_ids, spotify_source)
+- [x] Vista muestra conteo correcto: items.length + mix_ids.length
+- [x] Cover art de primera canción Spotify como thumbnail
+- [x] SpotifyLogo en playlists importadas
+- [x] Sidebar se refresca al navegar
+- [x] Backwards compatibility: campos faltantes se rellenan automáticamente
 
 ### Reproductor / Player Bar
 - [x] Progress bar con rAF, getValidDuration(), seek, CSS custom
 
-### Playlists
-- [x] PlaylistResponse modelo flexible con campos opcionales
-- [x] Playlists importadas de Spotify se pueden abrir y ver en detalle
-- [x] Backwards compatibility: user_name, mix_ids, items rellenados automáticamente
-- [x] Playlists compartibles, descarga offline
-
 ### Modo Clase
 - [x] Renombrado inline, advancingRef anti-doble-avance
 - [x] Progress bar sincronizada, transiciones Crossfade/Fade Out/Fade In/Cut
-- [x] URI propagado en todos los playMix para Spotify tracks
 
-### Perfil, UI
-- [x] Edición nombre, conectar/desconectar Spotify, responsive
-
-## Spotify Setup Required
-Redirect URI en Spotify Developer Dashboard:
-`https://fitmusic-platform.preview.emergentagent.com/spotify-callback`
+### Perfil, UI, Offline
+- [x] Edición, Spotify connect/disconnect, responsive, caché offline IndexedDB
 
 ## Backlog
 - [ ] Drag-and-drop reordenar tracks (P1)
