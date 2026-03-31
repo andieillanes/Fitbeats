@@ -180,12 +180,30 @@ class InstructorCreate(BaseModel):
     name: str
     studio_id: Optional[str] = None
 
+class AlbumCreate(BaseModel):
+    name: str
+    artist: str
+    year: int
+    description: Optional[str] = None
+
+class AlbumResponse(BaseModel):
+    album_id: str
+    name: str
+    artist: str
+    year: int
+    description: Optional[str] = None
+    cover_path: Optional[str] = None
+    created_at: str
+    is_active: bool = True
+    mix_count: int = 0
+
 class MixCreate(BaseModel):
     name: str
     artist: str
     bpm: int
     duration: int  # in seconds
     genre: str
+    album_id: str
     description: Optional[str] = None
 
 class MixResponse(BaseModel):
@@ -195,6 +213,8 @@ class MixResponse(BaseModel):
     bpm: int
     duration: int
     genre: str
+    album_id: str
+    album_name: Optional[str] = None
     description: Optional[str] = None
     audio_path: Optional[str] = None
     cover_path: Optional[str] = None
@@ -416,6 +436,124 @@ async def delete_studio(studio_id: str, request: Request):
     await db.studios.update_one({"studio_id": studio_id}, {"$set": {"is_active": False}})
     return {"message": "Studio deactivated"}
 
+# ==================== ALBUM ENDPOINTS ====================
+@api_router.post("/albums")
+async def create_album(
+    request: Request,
+    name: str = Query(...),
+    artist: str = Query(...),
+    year: int = Query(...),
+    description: Optional[str] = Query(None),
+    cover: Optional[UploadFile] = File(None)
+):
+    await require_admin(request)
+    
+    album_id = f"album_{uuid.uuid4().hex[:12]}"
+    
+    # Upload cover image if provided
+    cover_path = None
+    if cover:
+        cover_content = await cover.read()
+        cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
+        cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
+        put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
+    
+    album_doc = {
+        "album_id": album_id,
+        "name": name,
+        "artist": artist,
+        "year": year,
+        "description": description,
+        "cover_path": cover_path,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "is_active": True
+    }
+    await db.albums.insert_one(album_doc)
+    album_doc.pop("_id", None)
+    album_doc["mix_count"] = 0
+    return album_doc
+
+@api_router.get("/albums", response_model=List[AlbumResponse])
+async def list_albums(request: Request):
+    await get_current_user(request)
+    albums = await db.albums.find({"is_active": True}, {"_id": 0}).to_list(1000)
+    
+    # Add mix count for each album
+    for album in albums:
+        mix_count = await db.mixes.count_documents({"album_id": album["album_id"], "is_active": True})
+        album["mix_count"] = mix_count
+    
+    return [AlbumResponse(**a) for a in albums]
+
+@api_router.get("/albums/{album_id}")
+async def get_album(album_id: str, request: Request):
+    await get_current_user(request)
+    album = await db.albums.find_one({"album_id": album_id, "is_active": True}, {"_id": 0})
+    if not album:
+        raise HTTPException(status_code=404, detail="Album not found")
+    
+    # Get mixes in this album
+    mixes = await db.mixes.find({"album_id": album_id, "is_active": True}, {"_id": 0}).to_list(1000)
+    album["mixes"] = mixes
+    album["mix_count"] = len(mixes)
+    
+    return album
+
+@api_router.put("/albums/{album_id}")
+async def update_album(
+    album_id: str,
+    request: Request,
+    name: str = Query(...),
+    artist: str = Query(...),
+    year: int = Query(...),
+    description: Optional[str] = Query(None),
+    cover: Optional[UploadFile] = File(None)
+):
+    await require_admin(request)
+    
+    update_data = {
+        "name": name,
+        "artist": artist,
+        "year": year,
+        "description": description
+    }
+    
+    if cover:
+        cover_content = await cover.read()
+        cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
+        cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
+        put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
+        update_data["cover_path"] = cover_path
+    
+    result = await db.albums.update_one({"album_id": album_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Album not found")
+    return {"message": "Album updated"}
+
+@api_router.delete("/albums/{album_id}")
+async def delete_album(album_id: str, request: Request):
+    await require_admin(request)
+    # Check if album has mixes
+    mix_count = await db.mixes.count_documents({"album_id": album_id, "is_active": True})
+    if mix_count > 0:
+        raise HTTPException(status_code=400, detail=f"No se puede eliminar: el álbum tiene {mix_count} mixes")
+    await db.albums.update_one({"album_id": album_id}, {"$set": {"is_active": False}})
+    return {"message": "Album deactivated"}
+
+@api_router.get("/albums/{album_id}/cover")
+async def get_album_cover(album_id: str, request: Request, authorization: str = Header(None), auth: str = Query(None)):
+    auth_header = authorization or (f"Bearer {auth}" if auth else None)
+    if auth_header:
+        request._headers = {**dict(request.headers), "authorization": auth_header}
+    await get_current_user(request)
+    
+    album = await db.albums.find_one({"album_id": album_id, "is_active": True}, {"_id": 0})
+    if not album or not album.get("cover_path"):
+        raise HTTPException(status_code=404, detail="Cover not found")
+    
+    data, content_type = get_object(album["cover_path"])
+    return Response(content=data, media_type=content_type)
+
 # ==================== MIX ENDPOINTS ====================
 @api_router.post("/mixes")
 async def create_mix(
@@ -425,11 +563,17 @@ async def create_mix(
     bpm: int = Query(...),
     duration: int = Query(...),
     genre: str = Query(...),
+    album_id: str = Query(...),
     description: Optional[str] = Query(None),
     audio: UploadFile = File(...),
     cover: Optional[UploadFile] = File(None)
 ):
     await require_admin(request)
+    
+    # Verify album exists
+    album = await db.albums.find_one({"album_id": album_id, "is_active": True})
+    if not album:
+        raise HTTPException(status_code=400, detail="Album no encontrado")
     
     mix_id = f"mix_{uuid.uuid4().hex[:12]}"
     
@@ -439,8 +583,8 @@ async def create_mix(
     audio_path = f"{APP_NAME}/mixes/{mix_id}/audio.{audio_ext}"
     put_object(audio_path, audio_content, audio.content_type or "audio/mpeg")
     
-    # Upload cover image if provided
-    cover_path = None
+    # Upload cover image if provided, otherwise use album cover
+    cover_path = album.get("cover_path")  # Default to album cover
     if cover:
         cover_content = await cover.read()
         cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
@@ -454,6 +598,7 @@ async def create_mix(
         "bpm": bpm,
         "duration": duration,
         "genre": genre,
+        "album_id": album_id,
         "description": description,
         "audio_path": audio_path,
         "cover_path": cover_path,
@@ -462,12 +607,14 @@ async def create_mix(
     }
     await db.mixes.insert_one(mix_doc)
     mix_doc.pop("_id", None)
+    mix_doc["album_name"] = album["name"]
     return mix_doc
 
 @api_router.get("/mixes", response_model=List[MixResponse])
 async def list_mixes(
     request: Request,
     genre: Optional[str] = None,
+    album_id: Optional[str] = None,
     min_bpm: Optional[int] = None,
     max_bpm: Optional[int] = None,
     search: Optional[str] = None
@@ -477,6 +624,8 @@ async def list_mixes(
     query = {"is_active": True}
     if genre:
         query["genre"] = genre
+    if album_id:
+        query["album_id"] = album_id
     if min_bpm:
         query["bpm"] = {"$gte": min_bpm}
     if max_bpm:
@@ -488,6 +637,15 @@ async def list_mixes(
         ]
     
     mixes = await db.mixes.find(query, {"_id": 0}).to_list(1000)
+    
+    # Add album names
+    album_ids = list(set(m.get("album_id") for m in mixes if m.get("album_id")))
+    albums = await db.albums.find({"album_id": {"$in": album_ids}}, {"_id": 0, "album_id": 1, "name": 1}).to_list(1000)
+    album_map = {a["album_id"]: a["name"] for a in albums}
+    
+    for mix in mixes:
+        mix["album_name"] = album_map.get(mix.get("album_id"), "")
+    
     return [MixResponse(**m) for m in mixes]
 
 @api_router.get("/mixes/{mix_id}", response_model=MixResponse)
@@ -718,7 +876,9 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.users.create_index("user_id", unique=True)
     await db.studios.create_index("studio_id", unique=True)
+    await db.albums.create_index("album_id", unique=True)
     await db.mixes.create_index("mix_id", unique=True)
+    await db.mixes.create_index("album_id")
     await db.playlists.create_index("playlist_id", unique=True)
     
     # Seed admin user

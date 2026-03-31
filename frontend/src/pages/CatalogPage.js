@@ -5,7 +5,7 @@ import axios from 'axios';
 import Layout from '../components/Layout';
 import { 
   Play, MusicNote, Timer, MagnifyingGlass, 
-  Funnel, Plus, X, Download, CaretDown 
+  Funnel, Plus, X, Download, CaretDown, Disc 
 } from '@phosphor-icons/react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -28,24 +28,28 @@ export default function CatalogPage() {
   const { playMix, currentMix } = usePlayer();
   const [mixes, setMixes] = useState([]);
   const [filteredMixes, setFilteredMixes] = useState([]);
+  const [albums, setAlbums] = useState([]);
   const [genres, setGenres] = useState([]);
   const [playlists, setPlaylists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
+  const [selectedAlbum, setSelectedAlbum] = useState('');
   const [bpmRange, setBpmRange] = useState({ min: '', max: '' });
   const [addToPlaylistMix, setAddToPlaylistMix] = useState(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [mixesRes, genresRes, playlistsRes] = await Promise.all([
+        const [mixesRes, albumsRes, genresRes, playlistsRes] = await Promise.all([
           axios.get(`${API}/mixes`),
+          axios.get(`${API}/albums`),
           axios.get(`${API}/genres`),
           axios.get(`${API}/playlists/mine`)
         ]);
         setMixes(mixesRes.data);
         setFilteredMixes(mixesRes.data);
+        setAlbums(albumsRes.data);
         setGenres(genresRes.data);
         setPlaylists(playlistsRes.data);
       } catch (error) {
@@ -75,6 +79,10 @@ export default function CatalogPage() {
       result = result.filter(mix => mix.genre === selectedGenre);
     }
 
+    if (selectedAlbum) {
+      result = result.filter(mix => mix.album_id === selectedAlbum);
+    }
+
     if (bpmRange.min) {
       result = result.filter(mix => mix.bpm >= parseInt(bpmRange.min));
     }
@@ -84,7 +92,7 @@ export default function CatalogPage() {
     }
 
     setFilteredMixes(result);
-  }, [search, selectedGenre, bpmRange, mixes]);
+  }, [search, selectedGenre, selectedAlbum, bpmRange, mixes]);
 
   const formatDuration = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -134,6 +142,7 @@ export default function CatalogPage() {
   const clearFilters = () => {
     setSearch('');
     setSelectedGenre('');
+    setSelectedAlbum('');
     setBpmRange({ min: '', max: '' });
   };
 
@@ -208,6 +217,38 @@ export default function CatalogPage() {
               </DropdownMenuContent>
             </DropdownMenu>
 
+            {/* Album Filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
+                  data-testid="album-filter-btn"
+                >
+                  <Disc size={18} className="mr-2" />
+                  {albums.find(a => a.album_id === selectedAlbum)?.name || 'Álbum'}
+                  <CaretDown size={16} className="ml-2" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="bg-[#1F1F1F] border-[#27272A]">
+                <DropdownMenuItem 
+                  onClick={() => setSelectedAlbum('')}
+                  className="text-white hover:bg-[#27272A] cursor-pointer"
+                >
+                  Todos los álbumes
+                </DropdownMenuItem>
+                {albums.map((album) => (
+                  <DropdownMenuItem
+                    key={album.album_id}
+                    onClick={() => setSelectedAlbum(album.album_id)}
+                    className="text-white hover:bg-[#27272A] cursor-pointer"
+                  >
+                    {album.name} ({album.year})
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             {/* BPM Range */}
             <div className="flex items-center gap-2">
               <Input
@@ -230,7 +271,7 @@ export default function CatalogPage() {
             </div>
 
             {/* Clear Filters */}
-            {(search || selectedGenre || bpmRange.min || bpmRange.max) && (
+            {(search || selectedGenre || selectedAlbum || bpmRange.min || bpmRange.max) && (
               <Button
                 variant="ghost"
                 onClick={clearFilters}

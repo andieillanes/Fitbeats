@@ -5,7 +5,7 @@ import axios from 'axios';
 import Layout from '../components/Layout';
 import { 
   MusicNote, Users, Storefront, Upload, Plus, 
-  Trash, PencilSimple, Eye, EyeSlash, MagnifyingGlass
+  Trash, PencilSimple, Eye, EyeSlash, Disc, Calendar
 } from '@phosphor-icons/react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -38,8 +38,21 @@ import { toast } from 'sonner';
 
 export default function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'mixes');
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'albums');
   
+  // Albums state
+  const [albums, setAlbums] = useState([]);
+  const [showAlbumDialog, setShowAlbumDialog] = useState(false);
+  const [albumForm, setAlbumForm] = useState({
+    name: '',
+    artist: '',
+    year: new Date().getFullYear(),
+    description: ''
+  });
+  const [albumCoverFile, setAlbumCoverFile] = useState(null);
+  const [creatingAlbum, setCreatingAlbum] = useState(false);
+  const [deleteAlbum, setDeleteAlbum] = useState(null);
+
   // Mixes state
   const [mixes, setMixes] = useState([]);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
@@ -49,6 +62,7 @@ export default function AdminPage() {
     bpm: '',
     duration: '',
     genre: '',
+    album_id: '',
     description: ''
   });
   const [audioFile, setAudioFile] = useState(null);
@@ -84,11 +98,13 @@ export default function AdminPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [mixesRes, instructorsRes, studiosRes] = await Promise.all([
+      const [albumsRes, mixesRes, instructorsRes, studiosRes] = await Promise.all([
+        axios.get(`${API}/albums`),
         axios.get(`${API}/mixes`),
         axios.get(`${API}/admin/instructors`),
         axios.get(`${API}/studios`)
       ]);
+      setAlbums(albumsRes.data);
       setMixes(mixesRes.data);
       setInstructors(instructorsRes.data);
       setStudios(studiosRes.data);
@@ -108,6 +124,57 @@ export default function AdminPage() {
     setSearchParams({ tab: value });
   };
 
+  // Album handlers
+  const handleCreateAlbum = async () => {
+    if (!albumForm.name || !albumForm.artist || !albumForm.year) {
+      toast.error('Completa todos los campos requeridos');
+      return;
+    }
+
+    setCreatingAlbum(true);
+    try {
+      const formData = new FormData();
+      if (albumCoverFile) {
+        formData.append('cover', albumCoverFile);
+      }
+
+      const queryParams = new URLSearchParams({
+        name: albumForm.name,
+        artist: albumForm.artist,
+        year: albumForm.year.toString(),
+        ...(albumForm.description && { description: albumForm.description })
+      });
+
+      await axios.post(`${API}/albums?${queryParams.toString()}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      toast.success('Álbum creado exitosamente');
+      setShowAlbumDialog(false);
+      setAlbumForm({ name: '', artist: '', year: new Date().getFullYear(), description: '' });
+      setAlbumCoverFile(null);
+      fetchData();
+    } catch (error) {
+      toast.error('Error al crear el álbum');
+      console.error(error);
+    } finally {
+      setCreatingAlbum(false);
+    }
+  };
+
+  const handleDeleteAlbum = async () => {
+    if (!deleteAlbum) return;
+    try {
+      await axios.delete(`${API}/albums/${deleteAlbum.album_id}`);
+      toast.success('Álbum eliminado');
+      setDeleteAlbum(null);
+      fetchData();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(detail || 'Error al eliminar el álbum');
+    }
+  };
+
   // Mix upload handler
   const handleUploadMix = async () => {
     if (!audioFile) {
@@ -115,8 +182,8 @@ export default function AdminPage() {
       return;
     }
 
-    if (!uploadForm.name || !uploadForm.artist || !uploadForm.bpm || !uploadForm.duration || !uploadForm.genre) {
-      toast.error('Completa todos los campos requeridos');
+    if (!uploadForm.name || !uploadForm.artist || !uploadForm.bpm || !uploadForm.duration || !uploadForm.genre || !uploadForm.album_id) {
+      toast.error('Completa todos los campos requeridos (incluyendo álbum)');
       return;
     }
 
@@ -134,6 +201,7 @@ export default function AdminPage() {
         bpm: uploadForm.bpm,
         duration: uploadForm.duration,
         genre: uploadForm.genre,
+        album_id: uploadForm.album_id,
         ...(uploadForm.description && { description: uploadForm.description })
       });
 
@@ -154,7 +222,7 @@ export default function AdminPage() {
   };
 
   const resetUploadForm = () => {
-    setUploadForm({ name: '', artist: '', bpm: '', duration: '', genre: '', description: '' });
+    setUploadForm({ name: '', artist: '', bpm: '', duration: '', genre: '', album_id: '', description: '' });
     setAudioFile(null);
     setCoverFile(null);
   };
@@ -267,13 +335,21 @@ export default function AdminPage() {
             Panel de Administración
           </h1>
           <p className="text-[#A1A1AA]">
-            Gestiona mixes, instructores y estudios
+            Gestiona álbumes, mixes, instructores y estudios
           </p>
         </div>
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           <TabsList className="bg-[#141414] border border-[#27272A] p-1">
+            <TabsTrigger 
+              value="albums" 
+              className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white"
+              data-testid="tab-albums"
+            >
+              <Disc size={18} className="mr-2" />
+              Álbumes ({albums.length})
+            </TabsTrigger>
             <TabsTrigger 
               value="mixes" 
               className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white"
@@ -300,6 +376,77 @@ export default function AdminPage() {
             </TabsTrigger>
           </TabsList>
 
+          {/* Albums Tab */}
+          <TabsContent value="albums" className="mt-6">
+            <div className="bg-[#141414] border border-[#27272A] rounded-md p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                  Álbumes
+                </h2>
+                <Button
+                  onClick={() => setShowAlbumDialog(true)}
+                  className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold"
+                  data-testid="create-album-btn"
+                >
+                  <Plus size={18} className="mr-2" />
+                  Crear álbum
+                </Button>
+              </div>
+
+              {albums.length === 0 ? (
+                <div className="text-center py-12">
+                  <Disc size={48} className="mx-auto text-[#71717A] mb-4" />
+                  <p className="text-[#A1A1AA] mb-4">No hay álbumes creados</p>
+                  <p className="text-sm text-[#71717A] mb-4">Crea un álbum primero para poder subir mixes</p>
+                  <Button
+                    onClick={() => setShowAlbumDialog(true)}
+                    className="bg-[#007AFF] hover:bg-[#3395FF]"
+                  >
+                    Crear primer álbum
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {albums.map((album) => (
+                    <div
+                      key={album.album_id}
+                      className="bg-[#1F1F1F] border border-[#27272A] rounded-md p-4 hover-card group relative"
+                      data-testid={`album-card-${album.album_id}`}
+                    >
+                      <div className="w-full aspect-square rounded-md bg-gradient-to-br from-[#007AFF] to-[#005ECA] flex items-center justify-center mb-3 overflow-hidden">
+                        {album.cover_path ? (
+                          <img
+                            src={`${API}/albums/${album.album_id}/cover`}
+                            alt={album.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <Disc size={48} className="text-white" />
+                        )}
+                      </div>
+                      <h3 className="font-semibold text-white truncate">{album.name}</h3>
+                      <p className="text-sm text-[#A1A1AA] truncate">{album.artist}</p>
+                      <div className="flex items-center gap-2 mt-2 text-sm text-[#71717A]">
+                        <Calendar size={14} />
+                        <span>{album.year}</span>
+                        <span>•</span>
+                        <span>{album.mix_count} mixes</span>
+                      </div>
+
+                      <button
+                        onClick={() => setDeleteAlbum(album)}
+                        className="absolute top-2 right-2 p-2 rounded-md bg-[#27272A] text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/20 opacity-0 group-hover:opacity-100 transition-opacity"
+                        data-testid={`delete-album-btn-${album.album_id}`}
+                      >
+                        <Trash size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
           {/* Mixes Tab */}
           <TabsContent value="mixes" className="mt-6">
             <div className="bg-[#141414] border border-[#27272A] rounded-md p-6">
@@ -308,7 +455,14 @@ export default function AdminPage() {
                   Catálogo de Mixes
                 </h2>
                 <Button
-                  onClick={() => setShowUploadDialog(true)}
+                  onClick={() => {
+                    if (albums.length === 0) {
+                      toast.error('Debes crear un álbum primero');
+                      setActiveTab('albums');
+                      return;
+                    }
+                    setShowUploadDialog(true);
+                  }}
                   className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold"
                   data-testid="upload-mix-btn"
                 >
@@ -321,12 +475,16 @@ export default function AdminPage() {
                 <div className="text-center py-12">
                   <MusicNote size={48} className="mx-auto text-[#71717A] mb-4" />
                   <p className="text-[#A1A1AA] mb-4">No hay mixes en el catálogo</p>
-                  <Button
-                    onClick={() => setShowUploadDialog(true)}
-                    className="bg-[#007AFF] hover:bg-[#3395FF]"
-                  >
-                    Subir primer mix
-                  </Button>
+                  {albums.length === 0 ? (
+                    <p className="text-sm text-[#71717A]">Crea un álbum primero para poder subir mixes</p>
+                  ) : (
+                    <Button
+                      onClick={() => setShowUploadDialog(true)}
+                      className="bg-[#007AFF] hover:bg-[#3395FF]"
+                    >
+                      Subir primer mix
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -335,6 +493,7 @@ export default function AdminPage() {
                       <tr className="border-b border-[#27272A] text-xs uppercase tracking-[0.2em] font-bold text-[#71717A]">
                         <th className="text-left py-3 px-4">Título</th>
                         <th className="text-left py-3 px-4">Artista</th>
+                        <th className="text-left py-3 px-4">Álbum</th>
                         <th className="text-left py-3 px-4">Género</th>
                         <th className="text-center py-3 px-4">BPM</th>
                         <th className="text-center py-3 px-4">Duración</th>
@@ -361,6 +520,7 @@ export default function AdminPage() {
                             </div>
                           </td>
                           <td className="py-3 px-4 text-[#A1A1AA]">{mix.artist}</td>
+                          <td className="py-3 px-4 text-[#A1A1AA]">{mix.album_name || '-'}</td>
                           <td className="py-3 px-4 text-[#A1A1AA]">{mix.genre}</td>
                           <td className="py-3 px-4 text-center text-[#A1A1AA]">{mix.bpm}</td>
                           <td className="py-3 px-4 text-center text-[#A1A1AA]">{formatDuration(mix.duration)}</td>
@@ -525,6 +685,100 @@ export default function AdminPage() {
           </TabsContent>
         </Tabs>
 
+        {/* Create Album Dialog */}
+        <Dialog open={showAlbumDialog} onOpenChange={setShowAlbumDialog}>
+          <DialogContent className="bg-[#141414] border-[#27272A] text-white">
+            <DialogHeader>
+              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>
+                Crear nuevo álbum
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                  Nombre del álbum *
+                </label>
+                <Input
+                  value={albumForm.name}
+                  onChange={(e) => setAlbumForm({ ...albumForm, name: e.target.value })}
+                  placeholder="Cycling Power Vol. 1"
+                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
+                  data-testid="album-name-input"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                  Artista / DJ *
+                </label>
+                <Input
+                  value={albumForm.artist}
+                  onChange={(e) => setAlbumForm({ ...albumForm, artist: e.target.value })}
+                  placeholder="DJ FitBeats"
+                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
+                  data-testid="album-artist-input"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                  Año *
+                </label>
+                <Input
+                  type="number"
+                  value={albumForm.year}
+                  onChange={(e) => setAlbumForm({ ...albumForm, year: parseInt(e.target.value) || new Date().getFullYear() })}
+                  placeholder="2024"
+                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
+                  data-testid="album-year-input"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                  Descripción
+                </label>
+                <Input
+                  value={albumForm.description}
+                  onChange={(e) => setAlbumForm({ ...albumForm, description: e.target.value })}
+                  placeholder="Descripción opcional..."
+                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
+                  data-testid="album-description-input"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                  Imagen de portada
+                </label>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => setAlbumCoverFile(e.target.files[0])}
+                  className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1"
+                  data-testid="album-cover-input"
+                />
+                {albumCoverFile && (
+                  <p className="text-sm text-[#34C759] mt-1">{albumCoverFile.name}</p>
+                )}
+              </div>
+            </div>
+            <DialogFooter className="mt-6">
+              <Button
+                variant="outline"
+                onClick={() => { setShowAlbumDialog(false); setAlbumForm({ name: '', artist: '', year: new Date().getFullYear(), description: '' }); setAlbumCoverFile(null); }}
+                className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleCreateAlbum}
+                disabled={creatingAlbum}
+                className="bg-[#007AFF] hover:bg-[#3395FF]"
+                data-testid="confirm-create-album-btn"
+              >
+                {creatingAlbum ? 'Creando...' : 'Crear álbum'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Upload Mix Dialog */}
         <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
           <DialogContent className="bg-[#141414] border-[#27272A] text-white max-w-lg">
@@ -537,12 +791,32 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Nombre *
+                    Álbum *
+                  </label>
+                  <Select
+                    value={uploadForm.album_id}
+                    onValueChange={(value) => setUploadForm({ ...uploadForm, album_id: value })}
+                  >
+                    <SelectTrigger className="bg-[#1F1F1F] border-[#27272A] text-white" data-testid="mix-album-select">
+                      <SelectValue placeholder="Seleccionar álbum" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1F1F1F] border-[#27272A]">
+                      {albums.map((album) => (
+                        <SelectItem key={album.album_id} value={album.album_id} className="text-white">
+                          {album.name} ({album.year})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2">
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
+                    Nombre del mix *
                   </label>
                   <Input
                     value={uploadForm.name}
                     onChange={(e) => setUploadForm({ ...uploadForm, name: e.target.value })}
-                    placeholder="Nombre del mix"
+                    placeholder="Warm Up Mix"
                     className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
                     data-testid="mix-name-input"
                   />
@@ -626,7 +900,7 @@ export default function AdminPage() {
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Imagen de portada
+                    Imagen de portada (opcional, usa la del álbum si no se proporciona)
                   </label>
                   <Input
                     type="file"
@@ -824,6 +1098,26 @@ export default function AdminPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Delete Album Confirmation */}
+        <AlertDialog open={!!deleteAlbum} onOpenChange={() => setDeleteAlbum(null)}>
+          <AlertDialogContent className="bg-[#141414] border-[#27272A]">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-white">¿Eliminar álbum?</AlertDialogTitle>
+              <AlertDialogDescription className="text-[#A1A1AA]">
+                Esta acción desactivará el álbum "{deleteAlbum?.name}". Solo se puede eliminar si no tiene mixes.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">
+                Cancelar
+              </AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteAlbum} className="bg-[#FF3B30] hover:bg-[#FF6159]">
+                Eliminar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Delete Mix Confirmation */}
         <AlertDialog open={!!deleteMix} onOpenChange={() => setDeleteMix(null)}>
