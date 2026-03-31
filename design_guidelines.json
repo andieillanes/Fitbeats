@@ -1,0 +1,134 @@
+{
+  "theme": "dark",
+  "archetype": "The Performance Pro",
+  "mood": "High energy, elite athleticism, command-center focus",
+  "colors": {
+    "background": {
+      "default": "#0A0A0A",
+      "surface": "#141414",
+      "surface_elevated": "#1F1F1F"
+    },
+    "primary": {
+      "main": "#007AFF",
+      "hover": "#3395FF",
+      "active": "#005ECA",
+      "foreground": "#FFFFFF"
+    },
+    "accent": {
+      "main": "#FF3B30",
+      "hover": "#FF6159",
+      "foreground": "#FFFFFF"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "muted": "#71717A",
+      "inverse": "#000000"
+    },
+    "border": {
+      "default": "#27272A",
+      "focus": "#007AFF"
+    },
+    "status": {
+      "success": "#34C759",
+      "warning": "#FFCC00",
+      "error": "#FF3B30"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "'Outfit', sans-serif",
+      "body": "'Manrope', sans-serif",
+      "mono": "'JetBrains Mono', monospace"
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter font-black",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-bold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-semibold",
+      "h4": "text-lg sm:text-xl font-semibold",
+      "body": "text-base font-normal leading-relaxed",
+      "small": "text-sm font-medium",
+      "label": "text-xs uppercase tracking-[0.2em] font-bold"
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Dense and compact for the dashboard, using 'Control Room' grid.",
+    "grid_system": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6",
+    "container_padding": "p-6 md:p-8",
+    "border_radius": "rounded-md (max 8px) for cards and buttons. Sharp edges.",
+    "alignment": "Mobile-first, optical alignment, left-aligned data and forms."
+  },
+  "surfaces_and_components": {
+    "cards": {
+      "background": "bg-[#141414]",
+      "border": "border border-[#27272A]",
+      "shadow": "none",
+      "hover": "hover:-translate-y-1 hover:border-[#3f3f46] transition-transform duration-200"
+    },
+    "headers": {
+      "style": "Crystal Glass",
+      "classes": "bg-black/60 backdrop-blur-xl border-b border-white/10 shadow-sm z-50 sticky top-0"
+    },
+    "buttons": {
+      "primary": "bg-[#007AFF] text-white hover:bg-[#3395FF] active:bg-[#005ECA] rounded-md font-bold transition-colors",
+      "secondary": "bg-[#1F1F1F] text-white border border-[#27272A] hover:bg-[#27272A] rounded-md transition-colors",
+      "accent": "bg-[#FF3B30] text-white hover:bg-[#FF6159] rounded-md transition-colors"
+    },
+    "inputs": {
+      "background": "bg-[#1F1F1F]",
+      "border": "border border-[#27272A] focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]",
+      "text": "text-white placeholder:text-[#71717A]"
+    },
+    "music_player_bar": {
+      "style": "Fixed bottom bar, solid background",
+      "classes": "fixed bottom-0 left-0 right-0 bg-[#0A0A0A] border-t border-[#27272A] h-24 z-50 flex items-center px-6 gap-4"
+    }
+  },
+  "motion": {
+    "hover": "transition-all duration-200 ease-in-out",
+    "active": "scale-95 transition-transform duration-100",
+    "list_entrance": "staggered fade-up for mix/playlist rows"
+  },
+  "icons": {
+    "library": "@phosphor-icons/react",
+    "weight": "duotone for marketing, regular/bold for dashboard UI"
+  },
+  "media": {
+    "images": {
+      "hero_background": {
+        "url": "https://images.pexels.com/photos/14219616/pexels-photo-14219616.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Neon-lit fitness studio background for the login/marketing page."
+      },
+      "dj_mixing": {
+        "url": "https://images.pexels.com/photos/14912840/pexels-photo-14912840.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Female DJ mixing music with neon lighting, perfect for 'Mixes' or 'Instructors' placeholder images."
+      },
+      "dark_gym_class": {
+        "url": "https://images.pexels.com/photos/6339344/pexels-photo-6339344.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "People engaging in a workout class on red mats, used for Studio or Branch cards."
+      },
+      "workout_bike": {
+        "url": "https://images.unsplash.com/photo-1637870473618-8c9fa7d11f0a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwzfHxmaXRuZXNzJTIwY2xhc3MlMjBkYXJrfGVufDB8fHx8MTc3NDkyMTM3NHww&ixlib=rb-4.1.0&q=85",
+        "description": "Row of stationary exercise bikes in a dark gym setting. Use as placeholder for high-BPM mix covers."
+      },
+      "dj_headphones": {
+        "url": "https://images.pexels.com/photos/3339605/pexels-photo-3339605.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "DJ enjoying music with headphones in vibrant neon-lit setting. Use for 'Instructor' profile avatars."
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly adhere to the 'Performance Pro' dark theme archetype. Do not use pure white backgrounds anywhere.",
+    "Use the specific color hex codes provided for primary, accent, and backgrounds.",
+    "Implement a persistent global music player component fixed at the bottom of the viewport, styled like Spotify's web player but using our dark/volt blue palette.",
+    "Ensure all interactive elements have data-testid attributes for testing.",
+    "Do NOT use glassmorphism on dashboard cards or general UI; reserve it strictly for sticky headers/navs.",
+    "Use Manrope for body text and Outfit for headings. Install them via Google Fonts.",
+    "For mix items in the catalog, use a compact row or tight bento grid layout to maximize data density (Control Room Grid).",
+    "Do not use generic placeholder images. Rely exclusively on the media URLs provided in this JSON.",
+    "In the playlist creation view, use clear drag-and-drop affordances or intuitive '+' buttons with high contrast.",
+    "Include hover states (hover:-translate-y-1, border color change) for all interactive cards.",
+    "For the login/marketing view, use the hero_background image with a heavy black overlay (bg-black/60) to ensure text legibility.",
+    "Use Shadcn UI components extensively but strip away Vercel-like aesthetics (soft shadows, generic borders); apply the sharp, dark, 1px border styles defined here."
+  ]
+}
