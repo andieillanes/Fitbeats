@@ -249,8 +249,9 @@ export default function ClassModeView() {
         playMix(trackData, tracks.map(t => ({
           ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri
         })));
-      }
-      setTimeout(() => { advancingRef.current = false; }, 2000);
+      }         if (spotify?.pauseSpotify) spotify.pauseSpotify();
+
+            setTimeout(() => { advancingRef.current = false; }, 2000);
     };
 
     switch (transition) {
