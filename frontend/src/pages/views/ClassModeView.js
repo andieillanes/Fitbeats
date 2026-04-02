@@ -232,9 +232,7 @@ export default function ClassModeView() {
         audioRef.current.src = '';
         audioRef.current.load();
       }
-      // Stop Spotify if playing
       if (spotify?.pauseSpotify) spotify.pauseSpotify();
-      }
       setCurrentTrackIdx(toIdx);
       setTrackElapsed(0);
       const nextTrack = tracks[toIdx];
@@ -249,10 +247,10 @@ export default function ClassModeView() {
         playMix(trackData, tracks.map(t => ({
           ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri
         })));
-              }
-        if (spotify?.pauseSpotify) spotify.pauseSpotify();
-        setTimeout(() => { advancingRef.current = false; }, 2000);
-      };
+      }
+      setTimeout(() => { advancingRef.current = false; }, 2000);
+    };
+
     switch (transition) {
       case 'fade_out':
         savedVolumeRef.current = getVolume();
@@ -324,7 +322,7 @@ export default function ClassModeView() {
   useEffect(() => { currentTrackIdxRef.current = currentTrackIdx; }, [currentTrackIdx]);
   useEffect(() => { classPlayingRef.current = classPlaying; }, [classPlaying]);
 
-  // Spotify progress via interval (can read live state)
+  // Spotify progress via interval
   useEffect(() => {
     if (!classPlaying) {
       if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
@@ -372,27 +370,18 @@ export default function ClassModeView() {
 
     const update = () => {
       if (!classPlayingRef.current) return;
-
       const idx = currentTrackIdxRef.current;
       const track = tracksRef.current[idx];
       if (!track) { progressRafRef.current = requestAnimationFrame(update); return; }
-
-      // Skip Spotify tracks - handled by interval above
-      if (track.type === 'spotify') {
-        progressRafRef.current = requestAnimationFrame(update);
-        return;
-      }
+      if (track.type === 'spotify') { progressRafRef.current = requestAnimationFrame(update); return; }
 
       const maxDuration = getTrackDuration(track);
-      let realTime = audioRef?.current?.currentTime || 0;
-
+      const realTime = audioRef?.current?.currentTime || 0;
       setTrackElapsed(Math.min(realTime, maxDuration));
 
       if (!advancingRef.current && maxDuration > 0 && realTime > 0) {
         const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
-        const triggerPoint = maxDuration - transitionTime;
-
-        if (realTime >= triggerPoint) {
+        if (realTime >= maxDuration - transitionTime) {
           if (idx < tracksRef.current.length - 1) {
             performTransition(track, idx + 1);
           } else {
@@ -404,7 +393,6 @@ export default function ClassModeView() {
           }
         }
       }
-
       progressRafRef.current = requestAnimationFrame(update);
     };
 
@@ -443,8 +431,8 @@ export default function ClassModeView() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {sessions.map(session => (
-              <div 
-                key={session.session_id} 
+              <div
+                key={session.session_id}
                 className="bg-[#181818] rounded-xl p-5 hover:bg-[#282828] transition-colors cursor-pointer group"
                 onClick={() => openSession(session)}
                 data-testid={`class-session-${session.session_id}`}
@@ -565,7 +553,7 @@ export default function ClassModeView() {
                 )}
               </div>
             </div>
-            
+
             <div className="hidden sm:flex items-center gap-2">
               <ArrowsClockwise size={16} className="text-[#B3B3B3]" />
               <span className="text-xs text-[#B3B3B3]">Transición:</span>
@@ -610,8 +598,8 @@ export default function ClassModeView() {
                   const total = getTotalTime();
                   const pct = total > 0 ? (dur / total) * 100 : 0;
                   return (
-                    <div 
-                      key={i} 
+                    <div
+                      key={i}
                       className={`h-1.5 rounded-full cursor-pointer transition-colors ${
                         i < currentTrackIdx ? 'bg-[#1DB954]' : i === currentTrackIdx ? 'bg-[#1DB954]/50' : 'bg-[#404040]'
                       }`}
@@ -640,7 +628,7 @@ export default function ClassModeView() {
 
       <div className="space-y-2 mb-6">
         {tracks.map((track, idx) => (
-          <div 
+          <div
             key={`${track.mix_id || track.spotify_id}-${idx}`}
             className={`bg-[#181818] rounded-lg p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3 ${
               classPlaying && idx === currentTrackIdx ? 'ring-1 ring-[#1DB954] bg-[#1DB954]/5' : ''
@@ -704,7 +692,7 @@ export default function ClassModeView() {
         ))}
       </div>
 
-      <button 
+      <button
         onClick={() => { setShowAddSongs(true); setAddQuery(''); }}
         className="w-full py-4 border-2 border-dashed border-[#282828] rounded-xl text-[#B3B3B3] hover:text-white hover:border-[#535353] transition-colors flex items-center justify-center gap-2"
         data-testid="class-add-songs-btn"
