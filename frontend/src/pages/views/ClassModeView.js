@@ -335,8 +335,8 @@ export default function ClassModeView() {
       const maxDuration = getTrackDuration(track);
       let realTime = 0;
 
-      if (track.type === 'spotify') {
-        const pos = spotifyPositionRef.current;
+     if (track.type === 'spotify') {
+        const pos = spotify?.spotifyPosition || 0;
         if (pos && pos > 0) {
           realTime = pos / 1000;
         }
