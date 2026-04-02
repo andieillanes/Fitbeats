@@ -29,41 +29,36 @@ export default function ClassModeView() {
   const { playMix, currentMix, isPlaying, togglePlay, setIsPlaying, audioRef, audioCurrentTime, setVolume, getVolume } = usePlayer();
   const spotify = useSpotify();
   
-  // Sessions
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
-  
-  // Rename inline
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
-  
-  // Current session editor
   const [editSession, setEditSession] = useState(null);
   const [sessionName, setSessionName] = useState('');
   const [tracks, setTracks] = useState([]);
   const [transitionDuration, setTransitionDuration] = useState(3);
-  
-  // Add songs modal
   const [showAddSongs, setShowAddSongs] = useState(false);
   const [addQuery, setAddQuery] = useState('');
   const [addTab, setAddTab] = useState('mixes');
   const [searchMixes, setSearchMixes] = useState([]);
   const [searchSpotify, setSearchSpotify] = useState([]);
-  
-  // Class player
   const [classPlaying, setClassPlaying] = useState(false);
   const [currentTrackIdx, setCurrentTrackIdx] = useState(0);
   const [trackElapsed, setTrackElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   
-  // Refs for timers and transition
   const progressRafRef = useRef(null);
   const transitionRef = useRef(null);
   const savedVolumeRef = useRef(0.8);
-  const advancingRef = useRef(false); // Prevents double-advance race condition
+  const advancingRef = useRef(false);
+  const spotifyPositionRef = useRef(0);
 
   useEffect(() => { fetchSessions(); }, []);
+
+  useEffect(() => {
+    spotifyPositionRef.current = spotify?.spotifyPosition || 0;
+  }, [spotify?.spotifyPosition]);
 
   const fetchSessions = async () => {
     try {
@@ -73,7 +68,6 @@ export default function ClassModeView() {
     finally { setLoading(false); }
   };
 
-  // Search
   useEffect(() => {
     if (!showAddSongs) return;
     const doSearch = async () => {
@@ -108,7 +102,6 @@ export default function ClassModeView() {
 
   const getTrackDuration = (track) => track.custom_duration || getDefaultDuration(track);
 
-  // ==================== RENAME ====================
   const startRename = (e, session) => {
     e.stopPropagation();
     setRenamingId(session.session_id);
@@ -131,7 +124,6 @@ export default function ClassModeView() {
     setRenamingId(null);
   };
 
-  // ==================== SESSION CRUD ====================
   const createNewSession = () => {
     setEditSession(null);
     setSessionName('Nueva clase');
@@ -180,7 +172,6 @@ export default function ClassModeView() {
     } catch { toast.error('Error al eliminar'); }
   };
 
-  // ==================== TRACK MANAGEMENT ====================
   const addTrack = (item, type) => {
     const newTrack = {
       type,
@@ -210,7 +201,6 @@ export default function ClassModeView() {
     setTracks(newTracks);
   };
 
-  // ==================== TRANSITIONS ====================
   const fadeVolume = (from, to, durationMs, onDone) => {
     if (transitionRef.current) clearInterval(transitionRef.current);
     const steps = 20;
@@ -234,7 +224,6 @@ export default function ClassModeView() {
   };
 
   const performTransition = useCallback((fromTrack, toIdx) => {
-    // Guard: prevent double-advance
     if (advancingRef.current) return;
     advancingRef.current = true;
 
@@ -246,7 +235,6 @@ export default function ClassModeView() {
       setTrackElapsed(0);
       const nextTrack = tracks[toIdx];
       if (nextTrack) {
-        // For Spotify tracks, also pass uri explicitly
         const trackData = {
           ...nextTrack,
           type: nextTrack.type,
@@ -258,7 +246,6 @@ export default function ClassModeView() {
           ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri
         })));
       }
-      // Allow next advance after a delay (audio needs time to load new src)
       setTimeout(() => { advancingRef.current = false; }, 2000);
     };
 
@@ -267,30 +254,22 @@ export default function ClassModeView() {
         savedVolumeRef.current = getVolume();
         fadeVolume(savedVolumeRef.current, 0, durMs, () => {
           switchToNext();
-          // Restore volume after new track loads
           setTimeout(() => setVolume(savedVolumeRef.current), 500);
         });
         break;
-
       case 'fade_in':
         savedVolumeRef.current = getVolume();
         setVolume(0);
         switchToNext();
-        setTimeout(() => {
-          fadeVolume(0, savedVolumeRef.current, durMs);
-        }, 500);
+        setTimeout(() => { fadeVolume(0, savedVolumeRef.current, durMs); }, 500);
         break;
-
       case 'crossfade':
         savedVolumeRef.current = getVolume();
         fadeVolume(savedVolumeRef.current, 0, durMs / 2, () => {
           switchToNext();
-          setTimeout(() => {
-            fadeVolume(0, savedVolumeRef.current, durMs / 2);
-          }, 500);
+          setTimeout(() => { fadeVolume(0, savedVolumeRef.current, durMs / 2); }, 500);
         });
         break;
-
       case 'cut':
       default:
         switchToNext();
@@ -298,7 +277,6 @@ export default function ClassModeView() {
     }
   }, [tracks, transitionDuration, playMix, setVolume, getVolume]);
 
-  // ==================== CLASS PLAYBACK ====================
   const startClass = () => {
     if (tracks.length === 0) return;
     advancingRef.current = false;
@@ -308,12 +286,8 @@ export default function ClassModeView() {
     savedVolumeRef.current = getVolume();
     const track = tracks[0];
     if (!track) return;
-    const trackData = {
-      ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id, uri: track.uri
-    };
-    playMix(trackData, tracks.map(t => ({
-      ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri
-    })));
+    const trackData = { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id, uri: track.uri };
+    playMix(trackData, tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri })));
   };
 
   const stopClass = () => {
@@ -329,7 +303,7 @@ export default function ClassModeView() {
   };
 
   const skipToNext = () => {
-    advancingRef.current = false; // Reset to allow manual skip
+    advancingRef.current = false;
     if (currentTrackIdx < tracks.length - 1) {
       performTransition(tracks[currentTrackIdx], currentTrackIdx + 1);
     } else {
@@ -338,7 +312,6 @@ export default function ClassModeView() {
     }
   };
 
-  // Refs for the progress loop
   const tracksRef = useRef(tracks);
   const currentTrackIdxRef = useRef(currentTrackIdx);
   const classPlayingRef = useRef(classPlaying);
@@ -346,7 +319,6 @@ export default function ClassModeView() {
   useEffect(() => { currentTrackIdxRef.current = currentTrackIdx; }, [currentTrackIdx]);
   useEffect(() => { classPlayingRef.current = classPlaying; }, [classPlaying]);
 
-  // Progress sync: read real audio position via rAF
   useEffect(() => {
     if (!classPlaying) {
       if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = null; }
@@ -363,10 +335,8 @@ export default function ClassModeView() {
       const maxDuration = getTrackDuration(track);
       let realTime = 0;
 
-      // Read from actual audio source
       if (track.type === 'spotify') {
-        // For Spotify, read position from SDK state
-        const pos = spotify?.spotifyPosition;
+        const pos = spotifyPositionRef.current;
         if (pos && pos > 0) {
           realTime = pos / 1000;
         }
@@ -376,7 +346,6 @@ export default function ClassModeView() {
 
       setTrackElapsed(Math.min(realTime, maxDuration));
 
-      // Auto-advance check - only if not already advancing
       if (!advancingRef.current && maxDuration > 0 && realTime > 0) {
         const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
         const triggerPoint = maxDuration - transitionTime;
@@ -403,7 +372,6 @@ export default function ClassModeView() {
 
   const isEditing = editSession !== null || tracks.length > 0 || sessionName;
 
-  // ==================== SESSIONS LIST VIEW ====================
   if (!isEditing && !editSession) {
     return (
       <div data-testid="class-mode-view">
@@ -471,7 +439,6 @@ export default function ClassModeView() {
                     </button>
                   </div>
                 </div>
-                {/* Track previews */}
                 <div className="flex gap-1 mt-3">
                   {(session.tracks || []).slice(0, 5).map((t, i) => (
                     <div key={i} className="w-8 h-8 rounded bg-[#282828] overflow-hidden flex-shrink-0">
@@ -498,10 +465,8 @@ export default function ClassModeView() {
     );
   }
 
-  // ==================== SESSION EDITOR ====================
   return (
     <div data-testid="class-editor">
-      {/* Editor Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button onClick={() => { setEditSession(null); setTracks([]); setSessionName(''); stopClass(); }} className="text-[#B3B3B3] hover:text-white flex-shrink-0">
@@ -525,7 +490,6 @@ export default function ClassModeView() {
         </div>
       </div>
 
-      {/* Class Player Controls */}
       {tracks.length > 0 && (
         <div className="bg-gradient-to-r from-[#1DB954]/20 to-[#191414] rounded-xl p-4 sm:p-5 mb-6" data-testid="class-player-controls">
           <div className="flex items-center justify-between">
@@ -560,7 +524,6 @@ export default function ClassModeView() {
               </div>
             </div>
             
-            {/* Transition duration */}
             <div className="hidden sm:flex items-center gap-2">
               <ArrowsClockwise size={16} className="text-[#B3B3B3]" />
               <span className="text-xs text-[#B3B3B3]">Transición:</span>
@@ -576,7 +539,6 @@ export default function ClassModeView() {
             </div>
           </div>
 
-          {/* Progress bar for class - synced with real audio */}
           {classPlaying && (
             <div className="mt-3">
               <input
@@ -588,7 +550,6 @@ export default function ClassModeView() {
                 onChange={(e) => {
                   const newTime = parseFloat(e.target.value);
                   setTrackElapsed(newTime);
-                  // Actually seek the audio
                   if (tracks[currentTrackIdx]?.type === 'spotify' && spotify?.seekSpotify) {
                     spotify.seekSpotify(newTime * 1000);
                   } else if (audioRef?.current) {
@@ -601,7 +562,6 @@ export default function ClassModeView() {
                 }}
                 data-testid="class-progress-bar"
               />
-              {/* Track timeline showing all tracks */}
               <div className="flex mt-2 gap-0.5">
                 {tracks.map((t, i) => {
                   const dur = getTrackDuration(t);
@@ -636,7 +596,6 @@ export default function ClassModeView() {
         </div>
       )}
 
-      {/* Track List */}
       <div className="space-y-2 mb-6">
         {tracks.map((track, idx) => (
           <div 
@@ -646,7 +605,6 @@ export default function ClassModeView() {
             }`}
             data-testid={`class-track-${idx}`}
           >
-            {/* Reorder + Cover */}
             <div className="flex items-center gap-3 w-full sm:w-auto">
               <div className="flex flex-col gap-0.5">
                 <button onClick={() => moveTrack(idx, -1)} disabled={idx === 0} className="text-[#6A6A6A] hover:text-white disabled:opacity-20 text-xs">&#9650;</button>
@@ -670,9 +628,7 @@ export default function ClassModeView() {
               </div>
             </div>
 
-            {/* Controls */}
             <div className="flex items-center gap-3 sm:gap-4 flex-wrap sm:flex-nowrap w-full sm:w-auto sm:ml-auto">
-              {/* Duration control */}
               <div className="flex items-center gap-2">
                 <Timer size={14} className="text-[#B3B3B3] flex-shrink-0" />
                 <Input
@@ -687,7 +643,6 @@ export default function ClassModeView() {
                 <span className="text-xs text-[#6A6A6A]">seg</span>
               </div>
 
-              {/* Transition type */}
               <select
                 value={track.transition}
                 onChange={(e) => updateTrack(idx, 'transition', e.target.value)}
@@ -707,7 +662,6 @@ export default function ClassModeView() {
         ))}
       </div>
 
-      {/* Add songs button */}
       <button 
         onClick={() => { setShowAddSongs(true); setAddQuery(''); }}
         className="w-full py-4 border-2 border-dashed border-[#282828] rounded-xl text-[#B3B3B3] hover:text-white hover:border-[#535353] transition-colors flex items-center justify-center gap-2"
@@ -717,7 +671,6 @@ export default function ClassModeView() {
         <span>Agregar canciones</span>
       </button>
 
-      {/* Add Songs Dialog */}
       <Dialog open={showAddSongs} onOpenChange={setShowAddSongs}>
         <DialogContent className="bg-[#282828] border-0 text-white max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
@@ -738,8 +691,8 @@ export default function ClassModeView() {
               searchMixes.map(mix => (
                 <div key={mix.mix_id} className="flex items-center gap-3 p-2 rounded hover:bg-white/10">
                   <div className="w-10 h-10 rounded bg-[#1a1a1a] overflow-hidden flex-shrink-0">
-                    {mix.cover_path ? (
-                      <img src={`${API}/mixes/${mix.mix_id}/cover`} alt="" className="w-full h-full object-cover" />
+                    {mix.cover_url ? (
+                      <img src={mix.cover_url} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center"><MusicNote size={14} className="text-[#535353]" /></div>
                     )}
