@@ -231,6 +231,11 @@ export default function ClassModeView() {
     const durMs = transitionDuration * 1000;
 
     const switchToNext = () => {
+      if (audioRef?.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+        audioRef.current.load();
+      }
       setCurrentTrackIdx(toIdx);
       setTrackElapsed(0);
       const nextTrack = tracks[toIdx];
