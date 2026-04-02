@@ -182,7 +182,7 @@ export default function MainLayout() {
       
       if (audioRef.current && currentMix.mix_id) {
         // Start loading from network IMMEDIATELY for fast playback
-        audioRef.current.src = `${API}/mixes/${currentMix.mix_id}/audio`;
+        audioRef.current.src = currentMix.audio_url || `${API}/mixes/${currentMix.mix_id}/audio`;
         audioRef.current.load();
         if (isPlaying) {
           audioRef.current.play().catch(() => {});
