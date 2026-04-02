@@ -30,6 +30,10 @@ export default function AuthCallback() {
         });
         
         setUserData(response.data);
+        if (response.data.access_token) {
+  localStorage.setItem('fitbeats_token', response.data.access_token);
+  axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.access_token}`;
+}
         
         // Clear the hash and navigate
         window.history.replaceState(null, '', window.location.pathname);
