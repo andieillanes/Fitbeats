@@ -27,7 +27,8 @@ const TRANSITIONS = [
 export default function ClassModeView() {
   const navigate = useNavigate();
   const { playMix, currentMix, isPlaying, togglePlay, setIsPlaying, audioRef, audioCurrentTime, setVolume, getVolume } = usePlayer();
-  const spotify = useSpotify();
+ const spotify = useSpotify();
+const spotifyPosition = spotify?.spotifyPosition || 0;
   
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -58,8 +59,8 @@ export default function ClassModeView() {
   useEffect(() => { fetchSessions(); }, []);
 
   useEffect(() => {
-    setLocalSpotifyPos(spotify?.spotifyPosition || 0);
-  }, [spotify?.spotifyPosition]);
+  setLocalSpotifyPos(spotifyPosition);
+}, [spotifyPosition]);
 
   const fetchSessions = async () => {
     try {
