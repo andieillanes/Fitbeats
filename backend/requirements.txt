@@ -28,3 +28,4 @@ stripe
 uvicorn
 pydantic
 PyJWT
+mutagen
