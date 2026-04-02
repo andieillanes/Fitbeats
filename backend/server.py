@@ -348,6 +348,7 @@ async def register(user_data: UserCreate, response: Response):
     response.set_cookie(key="access_token", value=token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
     user_doc.pop("password_hash")
     user_doc.pop("_id", None)
+    user_doc["access_token"] = token
     return user_doc
 
 @api_router.post("/auth/login")
@@ -361,6 +362,7 @@ async def login(credentials: UserLogin, response: Response):
     token = create_access_token(user["user_id"], email, user["role"])
     response.set_cookie(key="access_token", value=token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
     user.pop("password_hash", None)
+    user["access_token"] = token
     return user
 
 @api_router.post("/auth/logout")
@@ -408,6 +410,7 @@ async def google_session(request: Request, response: Response):
     response.set_cookie(key="access_token", value=token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
     user.pop("password_hash", None)
     user.pop("_id", None)
+    user["access_token"] = token
     return user
 
 class ProfileUpdate(BaseModel):
@@ -508,11 +511,16 @@ async def create_album(request: Request, name: str = Query(...), artist: str = Q
     await require_admin(request)
     album_id = f"album_{uuid.uuid4().hex[:12]}"
     cover_path = None
-    if cover:
-        cover_content = await cover.read()
-        cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
-        cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
-        put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
+    if cover and cover.filename:
+        try:
+            cover_content = await cover.read()
+            if cover_content:
+                cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
+                cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
+                put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
+        except Exception as e:
+            logger.warning(f"Could not upload cover: {e}")
+            cover_path = None
     album_doc = {
         "album_id": album_id,
         "name": name,
@@ -552,12 +560,16 @@ async def get_album(album_id: str, request: Request):
 async def update_album(album_id: str, request: Request, name: str = Query(...), artist: str = Query(...), year: int = Query(...), description: Optional[str] = Query(None), cover: Optional[UploadFile] = File(None)):
     await require_admin(request)
     update_data = {"name": name, "artist": artist, "year": year, "description": description}
-    if cover:
-        cover_content = await cover.read()
-        cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
-        cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
-        put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
-        update_data["cover_path"] = cover_path
+    if cover and cover.filename:
+        try:
+            cover_content = await cover.read()
+            if cover_content:
+                cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
+                cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
+                put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
+                update_data["cover_path"] = cover_path
+        except Exception as e:
+            logger.warning(f"Could not upload cover: {e}")
     result = await db.albums.update_one({"album_id": album_id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Album not found")
@@ -598,13 +610,21 @@ async def create_mix(request: Request, name: str = Query(...), artist: str = Que
     final_genre = genre if genre else metadata.get("genre")
     audio_ext = audio.filename.split(".")[-1] if "." in audio.filename else "mp3"
     audio_path = f"{APP_NAME}/mixes/{mix_id}/audio.{audio_ext}"
-    put_object(audio_path, audio_content, audio.content_type or "audio/mpeg")
+    try:
+        put_object(audio_path, audio_content, audio.content_type or "audio/mpeg")
+    except Exception as e:
+        logger.warning(f"Could not upload audio: {e}")
+        audio_path = None
     cover_path = album.get("cover_path")
-    if cover:
-        cover_content = await cover.read()
-        cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
-        cover_path = f"{APP_NAME}/mixes/{mix_id}/cover.{cover_ext}"
-        put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
+    if cover and cover.filename:
+        try:
+            cover_content = await cover.read()
+            if cover_content:
+                cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
+                cover_path = f"{APP_NAME}/mixes/{mix_id}/cover.{cover_ext}"
+                put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
+        except Exception as e:
+            logger.warning(f"Could not upload cover: {e}")
     mix_doc = {
         "mix_id": mix_id,
         "name": name,
@@ -635,11 +655,15 @@ async def batch_upload_mixes(request: Request, artist: str = Query(...), album_i
     elif new_album_name:
         album_id = f"album_{uuid.uuid4().hex[:12]}"
         cover_path = None
-        if album_cover:
-            cover_content = await album_cover.read()
-            cover_ext = album_cover.filename.split(".")[-1] if "." in album_cover.filename else "jpg"
-            cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
-            put_object(cover_path, cover_content, album_cover.content_type or "image/jpeg")
+        if album_cover and album_cover.filename:
+            try:
+                cover_content = await album_cover.read()
+                if cover_content:
+                    cover_ext = album_cover.filename.split(".")[-1] if "." in album_cover.filename else "jpg"
+                    cover_path = f"{APP_NAME}/albums/{album_id}/cover.{cover_ext}"
+                    put_object(cover_path, cover_content, album_cover.content_type or "image/jpeg")
+            except Exception as e:
+                logger.warning(f"Could not upload cover: {e}")
         album = {
             "album_id": album_id,
             "name": new_album_name,
@@ -664,7 +688,11 @@ async def batch_upload_mixes(request: Request, artist: str = Query(...), album_i
             mix_id = f"mix_{uuid.uuid4().hex[:12]}"
             audio_ext = filename.split(".")[-1] if "." in filename else "mp3"
             audio_path = f"{APP_NAME}/mixes/{mix_id}/audio.{audio_ext}"
-            put_object(audio_path, audio_content, audio_file.content_type or "audio/mpeg")
+            try:
+                put_object(audio_path, audio_content, audio_file.content_type or "audio/mpeg")
+            except Exception as e:
+                logger.warning(f"Could not upload audio: {e}")
+                audio_path = None
             mix_doc = {
                 "mix_id": mix_id,
                 "name": name,
