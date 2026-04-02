@@ -38,43 +38,44 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret-key')
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
-B2_KEY_ID = os.environ.get("B2_KEY_ID")
-B2_APPLICATION_KEY = os.environ.get("B2_APPLICATION_KEY")
-B2_BUCKET_NAME = os.environ.get("B2_BUCKET_NAME", "fitbeats")
-B2_ENDPOINT = os.environ.get("B2_ENDPOINT", "s3.us-east-005.backblazeb2.com")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY")
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "fitbeats")
+R2_ENDPOINT = os.environ.get("R2_ENDPOINT")
+R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL")
 APP_NAME = "fitbeats"
 
 def get_s3_client():
     return boto3.client(
         's3',
-        endpoint_url=f"https://{B2_ENDPOINT}",
-        aws_access_key_id=B2_KEY_ID,
-        aws_secret_access_key=B2_APPLICATION_KEY,
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
         config=Config(signature_version='s3v4')
     )
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
     try:
         s3 = get_s3_client()
-        s3.put_object(Bucket=B2_BUCKET_NAME, Key=path, Body=data, ContentType=content_type)
+        s3.put_object(Bucket=R2_BUCKET_NAME, Key=path, Body=data, ContentType=content_type)
         return {"path": path}
     except Exception as e:
-        logger.error(f"Failed to upload to B2: {e}")
+        logger.error(f"Failed to upload to R2: {e}")
         raise HTTPException(status_code=500, detail=f"Storage upload failed: {str(e)}")
 
 def get_object(path: str) -> tuple:
     try:
         s3 = get_s3_client()
-        response = s3.get_object(Bucket=B2_BUCKET_NAME, Key=path)
+        response = s3.get_object(Bucket=R2_BUCKET_NAME, Key=path)
         data = response['Body'].read()
         content_type = response.get('ContentType', 'application/octet-stream')
         return data, content_type
     except Exception as e:
-        logger.error(f"Failed to download from B2: {e}")
+        logger.error(f"Failed to download from R2: {e}")
         raise HTTPException(status_code=404, detail="File not found in storage")
 
 def get_public_url(path: str) -> str:
-    return f"https://{B2_BUCKET_NAME}.{B2_ENDPOINT}/{path}"
+    return f"{R2_PUBLIC_URL}/{path}"
 
 AUDIO_CACHE_DIR = Path("/tmp/fitbeats_audio_cache")
 AUDIO_CACHE_DIR.mkdir(exist_ok=True)
