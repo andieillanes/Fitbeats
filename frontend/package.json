@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "ajv": "^8.0.0",
     "@hookform/resolvers": "^5.0.1",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-accordion": "^1.2.8",
@@ -37,7 +38,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "cra-template": "1.2.0",
-    "date-fns": "^4.1.0",
+    "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.507.0",
