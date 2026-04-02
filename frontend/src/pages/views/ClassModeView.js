@@ -232,6 +232,9 @@ export default function ClassModeView() {
         audioRef.current.src = '';
         audioRef.current.load();
       }
+      // Stop Spotify if playing
+      if (spotify?.pauseSpotify) spotify.pauseSpotify();
+      }
       setCurrentTrackIdx(toIdx);
       setTrackElapsed(0);
       const nextTrack = tracks[toIdx];
