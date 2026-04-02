@@ -47,6 +47,7 @@ export default function ClassModeView() {
   const [trackElapsed, setTrackElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
+  const [localSpotifyPos, setLocalSpotifyPos] = useState(0);
   
   const progressRafRef = useRef(null);
   const spotifyIntervalRef = useRef(null);
@@ -55,6 +56,10 @@ export default function ClassModeView() {
   const advancingRef = useRef(false);
 
   useEffect(() => { fetchSessions(); }, []);
+
+  useEffect(() => {
+    setLocalSpotifyPos(spotify?.spotifyPosition || 0);
+  }, [spotify?.spotifyPosition]);
 
   const fetchSessions = async () => {
     try {
@@ -322,44 +327,36 @@ export default function ClassModeView() {
   useEffect(() => { currentTrackIdxRef.current = currentTrackIdx; }, [currentTrackIdx]);
   useEffect(() => { classPlayingRef.current = classPlaying; }, [classPlaying]);
 
-  // Spotify progress via interval
+  // Spotify progress via state (localSpotifyPos updates trigger this)
   useEffect(() => {
-    if (!classPlaying) {
-      if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
-      return;
-    }
-    if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
+    if (!classPlaying) return;
 
-    spotifyIntervalRef.current = setInterval(() => {
-      const idx = currentTrackIdxRef.current;
-      const track = tracksRef.current[idx];
-      if (!track || track.type !== 'spotify') return;
+    const idx = currentTrackIdxRef.current;
+    const track = tracksRef.current[idx];
+    if (!track || track.type !== 'spotify') return;
 
-      const pos = spotify?.spotifyPosition || 0;
-      if (pos <= 0) return;
+    const pos = localSpotifyPos;
+    if (pos <= 0) return;
 
-      const realTime = pos / 1000;
-      const maxDuration = track.custom_duration || getDefaultDuration(track);
-      setTrackElapsed(Math.min(realTime, maxDuration));
+    const realTime = pos / 1000;
+    const maxDuration = track.custom_duration || getDefaultDuration(track);
+    setTrackElapsed(Math.min(realTime, maxDuration));
 
-      if (!advancingRef.current && maxDuration > 0) {
-        const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
-        if (realTime >= maxDuration - transitionTime) {
-          if (idx < tracksRef.current.length - 1) {
-            performTransition(track, idx + 1);
-          } else {
-            advancingRef.current = true;
-            setClassPlaying(false);
-            setIsPlaying(false);
-            toast.success('Clase terminada!');
-            setTimeout(() => { advancingRef.current = false; }, 1000);
-          }
+    if (!advancingRef.current && maxDuration > 0) {
+      const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
+      if (realTime >= maxDuration - transitionTime) {
+        if (idx < tracksRef.current.length - 1) {
+          performTransition(track, idx + 1);
+        } else {
+          advancingRef.current = true;
+          setClassPlaying(false);
+          setIsPlaying(false);
+          toast.success('Clase terminada!');
+          setTimeout(() => { advancingRef.current = false; }, 1000);
         }
       }
-    }, 500);
-
-    return () => { if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; } };
-  }, [classPlaying, currentTrackIdx, spotify?.spotifyPosition, transitionDuration, performTransition]);
+    }
+  }, [classPlaying, localSpotifyPos, currentTrackIdx, transitionDuration, performTransition]);
 
   // Local audio progress via rAF
   useEffect(() => {
