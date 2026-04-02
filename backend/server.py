@@ -38,7 +38,6 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret-key')
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
-# Backblaze B2 Configuration
 B2_KEY_ID = os.environ.get("B2_KEY_ID")
 B2_APPLICATION_KEY = os.environ.get("B2_APPLICATION_KEY")
 B2_BUCKET_NAME = os.environ.get("B2_BUCKET_NAME", "fitbeats")
@@ -57,12 +56,7 @@ def get_s3_client():
 def put_object(path: str, data: bytes, content_type: str) -> dict:
     try:
         s3 = get_s3_client()
-        s3.put_object(
-            Bucket=B2_BUCKET_NAME,
-            Key=path,
-            Body=data,
-            ContentType=content_type
-        )
+        s3.put_object(Bucket=B2_BUCKET_NAME, Key=path, Body=data, ContentType=content_type)
         return {"path": path}
     except Exception as e:
         logger.error(f"Failed to upload to B2: {e}")
@@ -279,6 +273,7 @@ class MixResponse(BaseModel):
     audio_path: Optional[str] = None
     cover_path: Optional[str] = None
     cover_url: Optional[str] = None
+    audio_url: Optional[str] = None
     created_at: str
     is_active: bool = True
 
@@ -562,6 +557,7 @@ async def get_album(album_id: str, request: Request):
     mixes = await db.mixes.find({"album_id": album_id, "is_active": True}, {"_id": 0}).to_list(1000)
     for mix in mixes:
         mix["cover_url"] = get_public_url(mix["cover_path"]) if mix.get("cover_path") else None
+        mix["audio_url"] = get_public_url(mix["audio_path"]) if mix.get("audio_path") else None
     album["mixes"] = mixes
     album["mix_count"] = len(mixes)
     album["cover_url"] = get_public_url(album["cover_path"]) if album.get("cover_path") else None
@@ -654,6 +650,7 @@ async def create_mix(request: Request, name: str = Query(...), artist: str = Que
     mix_doc.pop("_id", None)
     mix_doc["album_name"] = album["name"]
     mix_doc["cover_url"] = get_public_url(cover_path) if cover_path else None
+    mix_doc["audio_url"] = get_public_url(audio_path) if audio_path else None
     return mix_doc
 
 @api_router.post("/mixes/batch")
@@ -722,6 +719,8 @@ async def batch_upload_mixes(request: Request, artist: str = Query(...), album_i
             await db.mixes.insert_one(mix_doc)
             mix_doc.pop("_id", None)
             mix_doc["album_name"] = album["name"]
+            mix_doc["cover_url"] = get_public_url(album.get("cover_path")) if album.get("cover_path") else None
+            mix_doc["audio_url"] = get_public_url(audio_path) if audio_path else None
             created_mixes.append(mix_doc)
         except Exception as e:
             logger.error(f"Error uploading {audio_file.filename}: {e}")
@@ -749,6 +748,7 @@ async def list_mixes(request: Request, genre: Optional[str] = None, album_id: Op
     for mix in mixes:
         mix["album_name"] = album_map.get(mix.get("album_id"), "")
         mix["cover_url"] = get_public_url(mix["cover_path"]) if mix.get("cover_path") else None
+        mix["audio_url"] = get_public_url(mix["audio_path"]) if mix.get("audio_path") else None
     return [MixResponse(**m) for m in mixes]
 
 @api_router.get("/mixes/{mix_id}", response_model=MixResponse)
@@ -758,6 +758,7 @@ async def get_mix(mix_id: str, request: Request):
     if not mix:
         raise HTTPException(status_code=404, detail="Mix not found")
     mix["cover_url"] = get_public_url(mix["cover_path"]) if mix.get("cover_path") else None
+    mix["audio_url"] = get_public_url(mix["audio_path"]) if mix.get("audio_path") else None
     return MixResponse(**mix)
 
 @api_router.delete("/mixes/{mix_id}")
@@ -1254,7 +1255,7 @@ async def get_playlist_items(playlist_id: str, request: Request):
             mix = await db.mixes.find_one({"mix_id": item["mix_id"], "is_active": True}, {"_id": 0})
             if mix:
                 album = await db.albums.find_one({"album_id": mix.get("album_id")}, {"_id": 0, "name": 1})
-                enriched.append({"type": "mix", "mix_id": mix["mix_id"], "name": mix["name"], "artist": mix["artist"], "album_name": album["name"] if album else "", "duration": mix.get("duration"), "cover_path": mix.get("cover_path"), "cover_url": get_public_url(mix["cover_path"]) if mix.get("cover_path") else None, "bpm": mix.get("bpm"), "genre": mix.get("genre")})
+                enriched.append({"type": "mix", "mix_id": mix["mix_id"], "name": mix["name"], "artist": mix["artist"], "album_name": album["name"] if album else "", "duration": mix.get("duration"), "cover_path": mix.get("cover_path"), "cover_url": get_public_url(mix["cover_path"]) if mix.get("cover_path") else None, "audio_url": get_public_url(mix["audio_path"]) if mix.get("audio_path") else None, "bpm": mix.get("bpm"), "genre": mix.get("genre")})
         elif item.get("type") == "spotify":
             enriched.append({"type": "spotify", "spotify_id": item["spotify_id"], "name": item.get("name", ""), "artist": item.get("artist", ""), "album": item.get("album", ""), "album_image": item.get("album_image"), "duration_ms": item.get("duration_ms"), "uri": item.get("uri"), "preview_url": item.get("preview_url")})
     return {"items": enriched}
@@ -1311,7 +1312,7 @@ async def get_public_playlist_items(playlist_id: str):
             mix = await db.mixes.find_one({"mix_id": item["mix_id"], "is_active": True}, {"_id": 0})
             if mix:
                 album = await db.albums.find_one({"album_id": mix.get("album_id")}, {"_id": 0, "name": 1})
-                enriched.append({"type": "mix", "mix_id": mix["mix_id"], "name": mix["name"], "artist": mix["artist"], "album_name": album["name"] if album else "", "duration": mix.get("duration"), "cover_path": mix.get("cover_path"), "cover_url": get_public_url(mix["cover_path"]) if mix.get("cover_path") else None, "bpm": mix.get("bpm"), "genre": mix.get("genre")})
+                enriched.append({"type": "mix", "mix_id": mix["mix_id"], "name": mix["name"], "artist": mix["artist"], "album_name": album["name"] if album else "", "duration": mix.get("duration"), "cover_path": mix.get("cover_path"), "cover_url": get_public_url(mix["cover_path"]) if mix.get("cover_path") else None, "audio_url": get_public_url(mix["audio_path"]) if mix.get("audio_path") else None, "bpm": mix.get("bpm"), "genre": mix.get("genre")})
         elif item.get("type") == "spotify":
             enriched.append({"type": "spotify", "spotify_id": item["spotify_id"], "name": item.get("name", ""), "artist": item.get("artist", ""), "album": item.get("album", ""), "album_image": item.get("album_image"), "duration_ms": item.get("duration_ms"), "uri": item.get("uri"), "preview_url": item.get("preview_url")})
     return {"items": enriched}
