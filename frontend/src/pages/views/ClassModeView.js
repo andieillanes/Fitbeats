@@ -48,15 +48,13 @@ export default function ClassModeView() {
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   
- const progressRafRef = useRef(null);
-const transitionRef = useRef(null);
-const savedVolumeRef = useRef(0.8);
-const advancingRef = useRef(false);
-const spotifyRef = useRef(spotify);
-useEffect(() => { spotifyRef.current = spotify; }, [spotify]);
+  const progressRafRef = useRef(null);
+  const spotifyIntervalRef = useRef(null);
+  const transitionRef = useRef(null);
+  const savedVolumeRef = useRef(0.8);
+  const advancingRef = useRef(false);
 
   useEffect(() => { fetchSessions(); }, []);
-
 
   const fetchSessions = async () => {
     try {
@@ -300,6 +298,7 @@ useEffect(() => { spotifyRef.current = spotify; }, [spotify]);
     advancingRef.current = false;
     if (transitionRef.current) { clearInterval(transitionRef.current); transitionRef.current = null; }
     if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = null; }
+    if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
     setVolume(savedVolumeRef.current || 0.8);
     setTransitioning(false);
     setIsPlaying(false);
@@ -322,6 +321,46 @@ useEffect(() => { spotifyRef.current = spotify; }, [spotify]);
   useEffect(() => { currentTrackIdxRef.current = currentTrackIdx; }, [currentTrackIdx]);
   useEffect(() => { classPlayingRef.current = classPlaying; }, [classPlaying]);
 
+  // Spotify progress via interval (can read live state)
+  useEffect(() => {
+    if (!classPlaying) {
+      if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
+      return;
+    }
+    if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
+
+    spotifyIntervalRef.current = setInterval(() => {
+      const idx = currentTrackIdxRef.current;
+      const track = tracksRef.current[idx];
+      if (!track || track.type !== 'spotify') return;
+
+      const pos = spotify?.spotifyPosition || 0;
+      if (pos <= 0) return;
+
+      const realTime = pos / 1000;
+      const maxDuration = track.custom_duration || getDefaultDuration(track);
+      setTrackElapsed(Math.min(realTime, maxDuration));
+
+      if (!advancingRef.current && maxDuration > 0) {
+        const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
+        if (realTime >= maxDuration - transitionTime) {
+          if (idx < tracksRef.current.length - 1) {
+            performTransition(track, idx + 1);
+          } else {
+            advancingRef.current = true;
+            setClassPlaying(false);
+            setIsPlaying(false);
+            toast.success('Clase terminada!');
+            setTimeout(() => { advancingRef.current = false; }, 1000);
+          }
+        }
+      }
+    }, 500);
+
+    return () => { if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; } };
+  }, [classPlaying, currentTrackIdx, spotify?.spotifyPosition, transitionDuration, performTransition]);
+
+  // Local audio progress via rAF
   useEffect(() => {
     if (!classPlaying) {
       if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = null; }
@@ -335,17 +374,14 @@ useEffect(() => { spotifyRef.current = spotify; }, [spotify]);
       const track = tracksRef.current[idx];
       if (!track) { progressRafRef.current = requestAnimationFrame(update); return; }
 
-      const maxDuration = getTrackDuration(track);
-      let realTime = 0;
-
-     if (track.type === 'spotify') {
-        const pos = spotifyRef.current?.spotifyPosition || 0;
-        if (pos && pos > 0) {
-          realTime = pos / 1000;
-        }
-      } else if (audioRef?.current) {
-        realTime = audioRef.current.currentTime || 0;
+      // Skip Spotify tracks - handled by interval above
+      if (track.type === 'spotify') {
+        progressRafRef.current = requestAnimationFrame(update);
+        return;
       }
+
+      const maxDuration = getTrackDuration(track);
+      let realTime = audioRef?.current?.currentTime || 0;
 
       setTrackElapsed(Math.min(realTime, maxDuration));
 
