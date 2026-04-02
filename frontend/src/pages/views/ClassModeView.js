@@ -48,17 +48,15 @@ export default function ClassModeView() {
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   
-  const progressRafRef = useRef(null);
-  const transitionRef = useRef(null);
-  const savedVolumeRef = useRef(0.8);
-  const advancingRef = useRef(false);
-  const spotifyPositionRef = useRef(0);
+ const progressRafRef = useRef(null);
+const transitionRef = useRef(null);
+const savedVolumeRef = useRef(0.8);
+const advancingRef = useRef(false);
+const spotifyRef = useRef(spotify);
+useEffect(() => { spotifyRef.current = spotify; }, [spotify]);
 
   useEffect(() => { fetchSessions(); }, []);
 
-  useEffect(() => {
-    spotifyPositionRef.current = spotify?.spotifyPosition || 0;
-  }, [spotify?.spotifyPosition]);
 
   const fetchSessions = async () => {
     try {
@@ -341,7 +339,7 @@ export default function ClassModeView() {
       let realTime = 0;
 
      if (track.type === 'spotify') {
-        const pos = spotify?.spotifyPosition || 0;
+        const pos = spotifyRef.current?.spotifyPosition || 0;
         if (pos && pos > 0) {
           realTime = pos / 1000;
         }
