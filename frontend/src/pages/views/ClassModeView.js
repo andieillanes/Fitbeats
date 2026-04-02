@@ -192,6 +192,7 @@ export default function ClassModeView() {
       uri: item.uri,
       preview_url: item.preview_url,
       original_duration: type === 'spotify' ? item.duration_ms : item.duration,
+      audio_url: type === 'mix' ? item.audio_url : undefined,
       custom_duration: null,
       transition: 'crossfade',
     };
