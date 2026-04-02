@@ -143,12 +143,13 @@ export default function MainLayout() {
     setCurrentTime(0);
     setAudioCurrentTime(0);
 
-    if (isSpotifyTrack) {
-      // Pause HTML5 audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-      }
+   if (isSpotifyTrack) {
+  // Pause HTML5 audio
+  if (audioRef.current) {
+    audioRef.current.pause();
+    audioRef.current.src = '';
+    audioRef.current.load();
+  }
       
       // Build the Spotify URI if not present
       const uri = currentMix.uri || (currentMix.spotify_id ? `spotify:track:${currentMix.spotify_id}` : null);
