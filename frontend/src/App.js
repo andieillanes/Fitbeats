@@ -18,6 +18,12 @@ export const API = `${BACKEND_URL}/api`;
 // Configure axios defaults
 axios.defaults.withCredentials = true;
 
+// Load token from localStorage on startup
+const savedToken = localStorage.getItem('fitbeats_token');
+if (savedToken) {
+  axios.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
+}
+
 // Auth Context
 export const AuthContext = createContext(null);
 
@@ -50,6 +56,12 @@ function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
+
+    // Load token from localStorage
+    const token = localStorage.getItem('fitbeats_token');
+    if (token) {
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    }
     
     try {
       const response = await axios.get(`${API}/auth/me`);
@@ -67,22 +79,36 @@ function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const response = await axios.post(`${API}/auth/login`, { email, password });
+    if (response.data.access_token) {
+      localStorage.setItem('fitbeats_token', response.data.access_token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.access_token}`;
+    }
     setUser(response.data);
     return response.data;
   };
 
   const register = async (email, password, name) => {
     const response = await axios.post(`${API}/auth/register`, { email, password, name });
+    if (response.data.access_token) {
+      localStorage.setItem('fitbeats_token', response.data.access_token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.access_token}`;
+    }
     setUser(response.data);
     return response.data;
   };
 
   const logout = async () => {
     await axios.post(`${API}/auth/logout`);
+    localStorage.removeItem('fitbeats_token');
+    delete axios.defaults.headers.common['Authorization'];
     setUser(null);
   };
 
   const setUserData = (userData) => {
+    if (userData.access_token) {
+      localStorage.setItem('fitbeats_token', userData.access_token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${userData.access_token}`;
+    }
     setUser(userData);
   };
 
@@ -127,7 +153,6 @@ function SpotifyProvider({ children }) {
     }
   }, []);
 
-  // Re-check Spotify connection whenever user auth changes
   useEffect(() => {
     if (user) {
       checkConnection();
@@ -138,7 +163,6 @@ function SpotifyProvider({ children }) {
     }
   }, [user, checkConnection]);
 
-  // Load Spotify SDK when token is available
   useEffect(() => {
     if (!spotifyToken) return;
     if (document.getElementById('spotify-sdk-script')) {
@@ -153,35 +177,24 @@ function SpotifyProvider({ children }) {
     document.body.appendChild(script);
   }, [spotifyToken]);
 
-  // Transfer playback to our Web SDK device
   const transferPlayback = async (deviceId, token) => {
     try {
-      console.log('[FitBeats] Transferring playback to device:', deviceId);
       const resp = await fetch('https://api.spotify.com/v1/me/player', {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ device_ids: [deviceId], play: false })
       });
-      if (resp.ok || resp.status === 204) {
-        console.log('[FitBeats] Playback transferred successfully');
-        return true;
-      }
-      const errText = await resp.text();
-      console.warn('[FitBeats] Transfer response:', resp.status, errText);
+      if (resp.ok || resp.status === 204) return true;
       return false;
     } catch (e) {
-      console.error('[FitBeats] Transfer exception:', e);
       return false;
     }
   };
 
-  // Keep tokenRef in sync
   useEffect(() => { tokenRef.current = spotifyToken; }, [spotifyToken]);
 
-  // Initialize player when SDK ready - only once
   useEffect(() => {
     if (!sdkReady || !spotifyToken || spotifyPlayer) return;
-    console.log('[FitBeats] Initializing Spotify Player...');
     const player = new window.Spotify.Player({
       name: 'FitBeats Player',
       getOAuthToken: async (cb) => {
@@ -193,20 +206,16 @@ function SpotifyProvider({ children }) {
             cb(res.data.access_token);
             return;
           }
-        } catch { /* fallback below */ }
+        } catch { }
         cb(tokenRef.current);
       },
       volume: 0.8
     });
     player.addListener('ready', async ({ device_id }) => {
-      console.log('[FitBeats] Spotify Player ready, device:', device_id);
       setSpotifyDeviceId(device_id);
       await transferPlayback(device_id, tokenRef.current);
     });
-    player.addListener('not_ready', () => {
-      console.log('[FitBeats] Spotify Player not ready');
-      setSpotifyDeviceId(null);
-    });
+    player.addListener('not_ready', () => setSpotifyDeviceId(null));
     player.addListener('player_state_changed', (state) => {
       if (state) {
         setSpotifyIsPlaying(!state.paused);
@@ -219,7 +228,6 @@ function SpotifyProvider({ children }) {
     player.addListener('account_error', ({ message }) => console.error('[FitBeats] Spotify account error (Premium required):', message));
     player.connect().then(ok => console.log('[FitBeats] Spotify connect:', ok));
     setSpotifyPlayer(player);
-    // Cleanup on unmount only
     return () => {
       player.removeListener('ready');
       player.removeListener('not_ready');
@@ -232,7 +240,6 @@ function SpotifyProvider({ children }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdkReady, spotifyToken]);
 
-  // Poll position when playing via SDK
   useEffect(() => {
     if (!spotifyPlayer || !spotifyIsPlaying) {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -246,31 +253,25 @@ function SpotifyProvider({ children }) {
           setSpotifyDuration(state.duration);
           setSpotifyIsPlaying(!state.paused);
         }
-      } catch { /* ignore */ }
+      } catch { }
     }, 1000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [spotifyPlayer, spotifyIsPlaying]);
 
   const playSpotifyTrack = async (uri) => {
     try {
-      // Get fresh token
       try {
         const res = await axios.get(`${API}/spotify/token`);
         if (res.data.connected && res.data.access_token) {
           tokenRef.current = res.data.access_token;
           setSpotifyToken(res.data.access_token);
         }
-      } catch { /* use existing token */ }
+      } catch { }
 
       const token = tokenRef.current;
-      if (!token) {
-        console.log('[FitBeats] Cannot play - no token');
-        return false;
-      }
+      if (!token) return false;
 
-      // Strategy 1: Use SDK device_id if available
       if (spotifyDeviceId) {
-        console.log('[FitBeats] Trying SDK device:', spotifyDeviceId);
         await transferPlayback(spotifyDeviceId, token);
         await new Promise(resolve => setTimeout(resolve, 400));
         const resp = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${spotifyDeviceId}`, {
@@ -279,68 +280,48 @@ function SpotifyProvider({ children }) {
           body: JSON.stringify({ uris: [uri] })
         });
         if (resp.ok || resp.status === 204) {
-          console.log('[FitBeats] Playing via SDK device');
           setSpotifyIsPlaying(true);
           return true;
         }
-        console.warn('[FitBeats] SDK device play failed:', resp.status);
       }
 
-      // Strategy 2: Find ANY active device and play on it
-      console.log('[FitBeats] Trying any available device...');
       const devResp = await fetch('https://api.spotify.com/v1/me/player/devices', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (devResp.ok) {
         const devData = await devResp.json();
         const devices = devData.devices || [];
-        // Prefer our FitBeats player, then any active, then first available
         const fitbeats = devices.find(d => d.name === 'FitBeats Player');
         const active = devices.find(d => d.is_active);
         const target = fitbeats || active || devices[0];
-        
         if (target) {
-          console.log('[FitBeats] Using device:', target.name, target.id);
-          // Transfer to target device
           await fetch('https://api.spotify.com/v1/me/player', {
             method: 'PUT',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ device_ids: [target.id], play: false })
           });
           await new Promise(resolve => setTimeout(resolve, 500));
-          
           const playResp = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${target.id}`, {
             method: 'PUT',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ uris: [uri] })
           });
           if (playResp.ok || playResp.status === 204) {
-            console.log('[FitBeats] Playing via device:', target.name);
             setSpotifyIsPlaying(true);
-            // Update our device_id to the working one
-            if (target.name === 'FitBeats Player') {
-              setSpotifyDeviceId(target.id);
-            }
+            if (target.name === 'FitBeats Player') setSpotifyDeviceId(target.id);
             return true;
           }
-          console.warn('[FitBeats] Fallback play failed:', playResp.status);
         }
       }
 
-      // Strategy 3: Try server-side play as last resort
-      console.log('[FitBeats] Trying server-side play...');
       try {
         await axios.post(`${API}/spotify/play`, { uri });
         setSpotifyIsPlaying(true);
         return true;
-      } catch (e) {
-        console.warn('[FitBeats] Server-side play failed:', e.response?.status);
-      }
+      } catch (e) { }
 
-      console.error('[FitBeats] All play strategies failed');
       return false;
     } catch (e) {
-      console.error('[FitBeats] Spotify play exception:', e);
       return false;
     }
   };
@@ -377,7 +358,6 @@ function SpotifyProvider({ children }) {
   );
 }
 
-// Player Provider - supports both local mixes and Spotify tracks
 function PlayerProvider({ children }) {
   const [currentMix, setCurrentMix] = useState(null);
   const [playlist, setPlaylist] = useState([]);
@@ -387,7 +367,6 @@ function PlayerProvider({ children }) {
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState(false);
 
-  // Shared audio ref and state for cross-component access (e.g. ClassModeView)
   const audioRef = React.useRef(null);
   const [audioCurrentTime, setAudioCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -410,9 +389,7 @@ function PlayerProvider({ children }) {
     setIsPlaying(true);
   };
 
-  const addToQueue = (mix) => {
-    setQueue(prev => [...prev, mix]);
-  };
+  const addToQueue = (mix) => setQueue(prev => [...prev, mix]);
 
   const playNext = () => {
     if (queue.length > 0 && currentIndex < queue.length - 1) {
@@ -446,18 +423,14 @@ function PlayerProvider({ children }) {
     setCurrentIndex(0);
   };
 
-  // Volume control for transitions
   const setVolume = (vol) => {
     if (audioRef.current) audioRef.current.volume = Math.max(0, Math.min(1, vol));
   };
 
   const getVolume = () => audioRef.current?.volume ?? 0.8;
 
-  // Seek the audio element
   const seekAudio = (timeSec) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = timeSec;
-    }
+    if (audioRef.current) audioRef.current.currentTime = timeSec;
   };
 
   return (
@@ -473,7 +446,6 @@ function PlayerProvider({ children }) {
   );
 }
 
-// Protected Route
 function ProtectedRoute({ children, requireAdmin = false }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -497,7 +469,6 @@ function ProtectedRoute({ children, requireAdmin = false }) {
   return children;
 }
 
-// Main App Router
 function AppRouter() {
   const location = useLocation();
   
