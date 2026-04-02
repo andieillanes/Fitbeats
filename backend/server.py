@@ -22,6 +22,8 @@ import zipfile
 from mutagen import File as MutagenFile
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3
+import boto3
+from botocore.client import Config
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -36,10 +38,49 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret-key')
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+# Backblaze B2 Configuration
+B2_KEY_ID = os.environ.get("B2_KEY_ID")
+B2_APPLICATION_KEY = os.environ.get("B2_APPLICATION_KEY")
+B2_BUCKET_NAME = os.environ.get("B2_BUCKET_NAME", "fitbeats")
+B2_ENDPOINT = os.environ.get("B2_ENDPOINT", "s3.us-east-005.backblazeb2.com")
 APP_NAME = "fitbeats"
-storage_key = None
+
+def get_s3_client():
+    return boto3.client(
+        's3',
+        endpoint_url=f"https://{B2_ENDPOINT}",
+        aws_access_key_id=B2_KEY_ID,
+        aws_secret_access_key=B2_APPLICATION_KEY,
+        config=Config(signature_version='s3v4')
+    )
+
+def put_object(path: str, data: bytes, content_type: str) -> dict:
+    try:
+        s3 = get_s3_client()
+        s3.put_object(
+            Bucket=B2_BUCKET_NAME,
+            Key=path,
+            Body=data,
+            ContentType=content_type
+        )
+        return {"path": path}
+    except Exception as e:
+        logger.error(f"Failed to upload to B2: {e}")
+        raise HTTPException(status_code=500, detail=f"Storage upload failed: {str(e)}")
+
+def get_object(path: str) -> tuple:
+    try:
+        s3 = get_s3_client()
+        response = s3.get_object(Bucket=B2_BUCKET_NAME, Key=path)
+        data = response['Body'].read()
+        content_type = response.get('ContentType', 'application/octet-stream')
+        return data, content_type
+    except Exception as e:
+        logger.error(f"Failed to download from B2: {e}")
+        raise HTTPException(status_code=404, detail="File not found in storage")
+
+def get_public_url(path: str) -> str:
+    return f"https://{B2_BUCKET_NAME}.{B2_ENDPOINT}/{path}"
 
 AUDIO_CACHE_DIR = Path("/tmp/fitbeats_audio_cache")
 AUDIO_CACHE_DIR.mkdir(exist_ok=True)
@@ -54,43 +95,6 @@ spotify_client_token_expires = None
 
 app = FastAPI(title="FitBeats API")
 api_router = APIRouter(prefix="/api")
-
-def init_storage():
-    global storage_key
-    if storage_key:
-        return storage_key
-    try:
-        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-        resp.raise_for_status()
-        storage_key = resp.json()["storage_key"]
-        logger.info("Object storage initialized successfully")
-        return storage_key
-    except Exception as e:
-        logger.error(f"Failed to initialize storage: {e}")
-        return None
-
-def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    if not key:
-        raise HTTPException(status_code=500, detail="Storage not initialized")
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data, timeout=120
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-def get_object(path: str) -> tuple:
-    key = init_storage()
-    if not key:
-        raise HTTPException(status_code=500, detail="Storage not initialized")
-    resp = requests.get(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key}, timeout=120
-    )
-    resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
 def get_cached_audio(audio_path: str) -> tuple:
     safe_name = audio_path.replace("/", "_").replace("\\", "_")
@@ -248,6 +252,7 @@ class AlbumResponse(BaseModel):
     year: int
     description: Optional[str] = None
     cover_path: Optional[str] = None
+    cover_url: Optional[str] = None
     created_at: str
     is_active: bool = True
     mix_count: int = 0
@@ -273,6 +278,7 @@ class MixResponse(BaseModel):
     description: Optional[str] = None
     audio_path: Optional[str] = None
     cover_path: Optional[str] = None
+    cover_url: Optional[str] = None
     created_at: str
     is_active: bool = True
 
@@ -534,6 +540,7 @@ async def create_album(request: Request, name: str = Query(...), artist: str = Q
     await db.albums.insert_one(album_doc)
     album_doc.pop("_id", None)
     album_doc["mix_count"] = 0
+    album_doc["cover_url"] = get_public_url(cover_path) if cover_path else None
     return album_doc
 
 @api_router.get("/albums", response_model=List[AlbumResponse])
@@ -543,6 +550,7 @@ async def list_albums(request: Request):
     for album in albums:
         mix_count = await db.mixes.count_documents({"album_id": album["album_id"], "is_active": True})
         album["mix_count"] = mix_count
+        album["cover_url"] = get_public_url(album["cover_path"]) if album.get("cover_path") else None
     return [AlbumResponse(**a) for a in albums]
 
 @api_router.get("/albums/{album_id}")
@@ -552,8 +560,11 @@ async def get_album(album_id: str, request: Request):
     if not album:
         raise HTTPException(status_code=404, detail="Album not found")
     mixes = await db.mixes.find({"album_id": album_id, "is_active": True}, {"_id": 0}).to_list(1000)
+    for mix in mixes:
+        mix["cover_url"] = get_public_url(mix["cover_path"]) if mix.get("cover_path") else None
     album["mixes"] = mixes
     album["mix_count"] = len(mixes)
+    album["cover_url"] = get_public_url(album["cover_path"]) if album.get("cover_path") else None
     return album
 
 @api_router.put("/albums/{album_id}")
@@ -642,6 +653,7 @@ async def create_mix(request: Request, name: str = Query(...), artist: str = Que
     await db.mixes.insert_one(mix_doc)
     mix_doc.pop("_id", None)
     mix_doc["album_name"] = album["name"]
+    mix_doc["cover_url"] = get_public_url(cover_path) if cover_path else None
     return mix_doc
 
 @api_router.post("/mixes/batch")
@@ -736,6 +748,7 @@ async def list_mixes(request: Request, genre: Optional[str] = None, album_id: Op
     album_map = {a["album_id"]: a["name"] for a in albums}
     for mix in mixes:
         mix["album_name"] = album_map.get(mix.get("album_id"), "")
+        mix["cover_url"] = get_public_url(mix["cover_path"]) if mix.get("cover_path") else None
     return [MixResponse(**m) for m in mixes]
 
 @api_router.get("/mixes/{mix_id}", response_model=MixResponse)
@@ -744,6 +757,7 @@ async def get_mix(mix_id: str, request: Request):
     mix = await db.mixes.find_one({"mix_id": mix_id, "is_active": True}, {"_id": 0})
     if not mix:
         raise HTTPException(status_code=404, detail="Mix not found")
+    mix["cover_url"] = get_public_url(mix["cover_path"]) if mix.get("cover_path") else None
     return MixResponse(**mix)
 
 @api_router.delete("/mixes/{mix_id}")
@@ -1240,7 +1254,7 @@ async def get_playlist_items(playlist_id: str, request: Request):
             mix = await db.mixes.find_one({"mix_id": item["mix_id"], "is_active": True}, {"_id": 0})
             if mix:
                 album = await db.albums.find_one({"album_id": mix.get("album_id")}, {"_id": 0, "name": 1})
-                enriched.append({"type": "mix", "mix_id": mix["mix_id"], "name": mix["name"], "artist": mix["artist"], "album_name": album["name"] if album else "", "duration": mix.get("duration"), "cover_path": mix.get("cover_path"), "bpm": mix.get("bpm"), "genre": mix.get("genre")})
+                enriched.append({"type": "mix", "mix_id": mix["mix_id"], "name": mix["name"], "artist": mix["artist"], "album_name": album["name"] if album else "", "duration": mix.get("duration"), "cover_path": mix.get("cover_path"), "cover_url": get_public_url(mix["cover_path"]) if mix.get("cover_path") else None, "bpm": mix.get("bpm"), "genre": mix.get("genre")})
         elif item.get("type") == "spotify":
             enriched.append({"type": "spotify", "spotify_id": item["spotify_id"], "name": item.get("name", ""), "artist": item.get("artist", ""), "album": item.get("album", ""), "album_image": item.get("album_image"), "duration_ms": item.get("duration_ms"), "uri": item.get("uri"), "preview_url": item.get("preview_url")})
     return {"items": enriched}
@@ -1297,7 +1311,7 @@ async def get_public_playlist_items(playlist_id: str):
             mix = await db.mixes.find_one({"mix_id": item["mix_id"], "is_active": True}, {"_id": 0})
             if mix:
                 album = await db.albums.find_one({"album_id": mix.get("album_id")}, {"_id": 0, "name": 1})
-                enriched.append({"type": "mix", "mix_id": mix["mix_id"], "name": mix["name"], "artist": mix["artist"], "album_name": album["name"] if album else "", "duration": mix.get("duration"), "cover_path": mix.get("cover_path"), "bpm": mix.get("bpm"), "genre": mix.get("genre")})
+                enriched.append({"type": "mix", "mix_id": mix["mix_id"], "name": mix["name"], "artist": mix["artist"], "album_name": album["name"] if album else "", "duration": mix.get("duration"), "cover_path": mix.get("cover_path"), "cover_url": get_public_url(mix["cover_path"]) if mix.get("cover_path") else None, "bpm": mix.get("bpm"), "genre": mix.get("genre")})
         elif item.get("type") == "spotify":
             enriched.append({"type": "spotify", "spotify_id": item["spotify_id"], "name": item.get("name", ""), "artist": item.get("artist", ""), "album": item.get("album", ""), "album_image": item.get("album_image"), "duration_ms": item.get("duration_ms"), "uri": item.get("uri"), "preview_url": item.get("preview_url")})
     return {"items": enriched}
@@ -1312,10 +1326,6 @@ async def health():
 
 @app.on_event("startup")
 async def startup():
-    try:
-        init_storage()
-    except Exception as e:
-        logger.error(f"Storage init failed: {e}")
     await db.users.create_index("email", unique=True)
     await db.users.create_index("user_id", unique=True)
     await db.studios.create_index("studio_id", unique=True)
@@ -1333,16 +1343,6 @@ async def startup():
     elif not verify_password(admin_password, existing.get("password_hash", "")):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
         logger.info("Admin password updated")
-    try:
-        os.makedirs("/tmp/memory", exist_ok=True)
-        with open("/tmp/memory/test_credentials.md", "w") as f:
-            f.write("# Test Credentials\n\n")
-            f.write("## Admin\n")
-            f.write(f"- Email: {admin_email}\n")
-            f.write(f"- Password: {admin_password}\n")
-            f.write("- Role: admin\n")
-    except Exception as e:
-        logger.warning(f"Could not write credentials file: {e}")
     logger.info("FitBeats API started successfully")
 
 @app.on_event("shutdown")
