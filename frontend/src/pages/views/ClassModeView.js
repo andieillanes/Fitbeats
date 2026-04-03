@@ -234,10 +234,12 @@ export default function ClassModeView() {
         audioRef.current.load();
       }
       if (spotify?.pauseSpotify) spotify.pauseSpotify();
+      if (spotify?.spotifyPlayer) spotify.spotifyPlayer.pause();
       trackStartTimeRef.current = null;
       setCurrentTrackIdx(toIdx);
       setTrackElapsed(0);
-      const nextTrack = tracks[toIdx];
+      // USE tracksRef.current instead of tracks to avoid stale closure
+      const nextTrack = tracksRef.current[toIdx];
       if (nextTrack) {
         const trackData = {
           ...nextTrack,
@@ -246,7 +248,7 @@ export default function ClassModeView() {
           spotify_id: nextTrack.spotify_id,
           uri: nextTrack.uri,
         };
-        playMix(trackData, tracks.map(t => ({
+        playMix(trackData, tracksRef.current.map(t => ({
           ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri
         })));
       }
@@ -279,7 +281,7 @@ export default function ClassModeView() {
         switchToNext();
         break;
     }
-  }, [tracks, transitionDuration, playMix, setVolume, getVolume]);
+  }, [transitionDuration, playMix, setVolume, getVolume]);
 
   const startClass = () => {
     if (tracks.length === 0) return;
@@ -289,10 +291,10 @@ export default function ClassModeView() {
     setTrackElapsed(0);
     trackStartTimeRef.current = Date.now();
     savedVolumeRef.current = getVolume();
-    const track = tracks[0];
+    const track = tracksRef.current[0];
     if (!track) return;
     const trackData = { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id, uri: track.uri };
-    playMix(trackData, tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri })));
+    playMix(trackData, tracksRef.current.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri })));
   };
 
   const stopClass = () => {
@@ -312,7 +314,7 @@ export default function ClassModeView() {
   const skipToNext = () => {
     advancingRef.current = false;
     if (currentTrackIdx < tracks.length - 1) {
-      performTransition(tracks[currentTrackIdx], currentTrackIdx + 1);
+      performTransition(tracksRef.current[currentTrackIdx], currentTrackIdx + 1);
     } else {
       stopClass();
       toast.success('Clase terminada!');
@@ -333,7 +335,7 @@ export default function ClassModeView() {
     }
   }, [currentTrackIdx]);
 
-  // Spotify progress via own timer (Date.now() based - no React dependency issues)
+  // Spotify progress via own timer
   useEffect(() => {
     if (!classPlaying) {
       if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
@@ -349,6 +351,8 @@ export default function ClassModeView() {
 
       const elapsed = (Date.now() - trackStartTimeRef.current) / 1000;
       const maxDuration = track.custom_duration || getDefaultDuration(track);
+
+      // Always update timer
       setTrackElapsed(Math.min(elapsed, maxDuration));
 
       if (!advancingRef.current && maxDuration > 0) {
@@ -392,7 +396,7 @@ export default function ClassModeView() {
         const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
         if (realTime >= maxDuration - transitionTime) {
           if (idx < tracksRef.current.length - 1) {
-            performTransition(track, idx + 1);
+            performTransition(tracksRef.current[idx], idx + 1);
           } else {
             advancingRef.current = true;
             setClassPlaying(false);
@@ -491,7 +495,7 @@ export default function ClassModeView() {
                     </div>
                   ))}
                   {(session.tracks || []).length > 5 && (
-                    <div className="w-8 h-8 rounded bg-[#282828] flex items-center justify-center text-xs text-[#B3B3B3]">
+                    <div className="w-8 h-8 rounded bg-[#282828] flex items-center justify-center text.xs text-[#B3B3B3]">
                       +{session.tracks.length - 5}
                     </div>
                   )}
@@ -619,11 +623,11 @@ export default function ClassModeView() {
                         trackStartTimeRef.current = Date.now();
                         setCurrentTrackIdx(i);
                         setTrackElapsed(0);
-                        const track = tracks[i];
+                        const track = tracksRef.current[i];
                         if (track) {
                           playMix(
                             { ...track, type: track.type, mix_id: track.mix_id, spotify_id: track.spotify_id, uri: track.uri },
-                            tracks.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri }))
+                            tracksRef.current.map(t => ({ ...t, type: t.type, mix_id: t.mix_id, spotify_id: t.spotify_id, uri: t.uri }))
                           );
                         }
                       }}
