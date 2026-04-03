@@ -27,8 +27,7 @@ const TRANSITIONS = [
 export default function ClassModeView() {
   const navigate = useNavigate();
   const { playMix, currentMix, isPlaying, togglePlay, setIsPlaying, audioRef, audioCurrentTime, setVolume, getVolume } = usePlayer();
- const spotify = useSpotify();
-const spotifyPosition = spotify?.spotifyPosition || 0;
+  const spotify = useSpotify();
   
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,19 +47,15 @@ const spotifyPosition = spotify?.spotifyPosition || 0;
   const [trackElapsed, setTrackElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
-  const [localSpotifyPos, setLocalSpotifyPos] = useState(0);
   
   const progressRafRef = useRef(null);
   const spotifyIntervalRef = useRef(null);
   const transitionRef = useRef(null);
   const savedVolumeRef = useRef(0.8);
   const advancingRef = useRef(false);
+  const trackStartTimeRef = useRef(null);
 
   useEffect(() => { fetchSessions(); }, []);
-
-  useEffect(() => {
-  setLocalSpotifyPos(spotifyPosition);
-}, [spotifyPosition]);
 
   const fetchSessions = async () => {
     try {
@@ -239,6 +234,7 @@ const spotifyPosition = spotify?.spotifyPosition || 0;
         audioRef.current.load();
       }
       if (spotify?.pauseSpotify) spotify.pauseSpotify();
+      trackStartTimeRef.current = null;
       setCurrentTrackIdx(toIdx);
       setTrackElapsed(0);
       const nextTrack = tracks[toIdx];
@@ -291,6 +287,7 @@ const spotifyPosition = spotify?.spotifyPosition || 0;
     setClassPlaying(true);
     setCurrentTrackIdx(0);
     setTrackElapsed(0);
+    trackStartTimeRef.current = Date.now();
     savedVolumeRef.current = getVolume();
     const track = tracks[0];
     if (!track) return;
@@ -302,6 +299,7 @@ const spotifyPosition = spotify?.spotifyPosition || 0;
     setClassPlaying(false);
     setCurrentTrackIdx(0);
     setTrackElapsed(0);
+    trackStartTimeRef.current = null;
     advancingRef.current = false;
     if (transitionRef.current) { clearInterval(transitionRef.current); transitionRef.current = null; }
     if (progressRafRef.current) { cancelAnimationFrame(progressRafRef.current); progressRafRef.current = null; }
@@ -328,36 +326,49 @@ const spotifyPosition = spotify?.spotifyPosition || 0;
   useEffect(() => { currentTrackIdxRef.current = currentTrackIdx; }, [currentTrackIdx]);
   useEffect(() => { classPlayingRef.current = classPlaying; }, [classPlaying]);
 
-  // Spotify progress via state (localSpotifyPos updates trigger this)
+  // Reset timer when track changes
   useEffect(() => {
-    if (!classPlaying) return;
+    if (classPlaying) {
+      trackStartTimeRef.current = Date.now();
+    }
+  }, [currentTrackIdx]);
 
-    const idx = currentTrackIdxRef.current;
-    const track = tracksRef.current[idx];
-    if (!track || track.type !== 'spotify') return;
+  // Spotify progress via own timer (Date.now() based - no React dependency issues)
+  useEffect(() => {
+    if (!classPlaying) {
+      if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
+      return;
+    }
+    if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; }
 
-    const pos = localSpotifyPos;
-    if (pos <= 0) return;
+    spotifyIntervalRef.current = setInterval(() => {
+      const idx = currentTrackIdxRef.current;
+      const track = tracksRef.current[idx];
+      if (!track || track.type !== 'spotify') return;
+      if (!trackStartTimeRef.current) { trackStartTimeRef.current = Date.now(); return; }
 
-    const realTime = pos / 1000;
-    const maxDuration = track.custom_duration || getDefaultDuration(track);
-    setTrackElapsed(Math.min(realTime, maxDuration));
+      const elapsed = (Date.now() - trackStartTimeRef.current) / 1000;
+      const maxDuration = track.custom_duration || getDefaultDuration(track);
+      setTrackElapsed(Math.min(elapsed, maxDuration));
 
-    if (!advancingRef.current && maxDuration > 0) {
-      const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
-      if (realTime >= maxDuration - transitionTime) {
-        if (idx < tracksRef.current.length - 1) {
-          performTransition(track, idx + 1);
-        } else {
-          advancingRef.current = true;
-          setClassPlaying(false);
-          setIsPlaying(false);
-          toast.success('Clase terminada!');
-          setTimeout(() => { advancingRef.current = false; }, 1000);
+      if (!advancingRef.current && maxDuration > 0) {
+        const transitionTime = track.transition !== 'cut' ? transitionDuration : 0;
+        if (elapsed >= maxDuration - transitionTime) {
+          if (idx < tracksRef.current.length - 1) {
+            performTransition(track, idx + 1);
+          } else {
+            advancingRef.current = true;
+            setClassPlaying(false);
+            setIsPlaying(false);
+            toast.success('Clase terminada!');
+            setTimeout(() => { advancingRef.current = false; }, 1000);
+          }
         }
       }
-    }
-  }, [classPlaying, localSpotifyPos, currentTrackIdx, transitionDuration, performTransition]);
+    }, 250);
+
+    return () => { if (spotifyIntervalRef.current) { clearInterval(spotifyIntervalRef.current); spotifyIntervalRef.current = null; } };
+  }, [classPlaying, currentTrackIdx, transitionDuration, performTransition]);
 
   // Local audio progress via rAF
   useEffect(() => {
@@ -580,6 +591,7 @@ const spotifyPosition = spotify?.spotifyPosition || 0;
                   setTrackElapsed(newTime);
                   if (tracks[currentTrackIdx]?.type === 'spotify' && spotify?.seekSpotify) {
                     spotify.seekSpotify(newTime * 1000);
+                    trackStartTimeRef.current = Date.now() - (newTime * 1000);
                   } else if (audioRef?.current) {
                     audioRef.current.currentTime = newTime;
                   }
@@ -604,6 +616,7 @@ const spotifyPosition = spotify?.spotifyPosition || 0;
                       style={{ width: `${pct}%` }}
                       onClick={() => {
                         advancingRef.current = false;
+                        trackStartTimeRef.current = Date.now();
                         setCurrentTrackIdx(i);
                         setTrackElapsed(0);
                         const track = tracks[i];
