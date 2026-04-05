@@ -5,7 +5,7 @@ import axios from 'axios';
 import Layout from '../components/Layout';
 import { 
   MusicNote, Users, Storefront, Upload, Plus, 
-  Trash, PencilSimple, Eye, EyeSlash, Disc, Calendar
+  Trash, PencilSimple, Eye, EyeSlash, Disc, Calendar, X, MagnifyingGlass
 } from '@phosphor-icons/react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -53,6 +53,17 @@ export default function AdminPage() {
   const [creatingAlbum, setCreatingAlbum] = useState(false);
   const [deleteAlbum, setDeleteAlbum] = useState(null);
 
+  // Edit album state
+  const [editAlbum, setEditAlbum] = useState(null);
+  const [editAlbumForm, setEditAlbumForm] = useState({ name: '', artist: '', year: new Date().getFullYear(), description: '' });
+  const [editAlbumCoverFile, setEditAlbumCoverFile] = useState(null);
+  const [editAlbumTab, setEditAlbumTab] = useState('metadata');
+  const [editAlbumMixes, setEditAlbumMixes] = useState([]);
+  const [savingAlbum, setSavingAlbum] = useState(false);
+  const [addMixSearch, setAddMixSearch] = useState('');
+  const [addMixResults, setAddMixResults] = useState([]);
+  const [searchingMixes, setSearchingMixes] = useState(false);
+
   // Mixes state
   const [mixes, setMixes] = useState([]);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
@@ -74,7 +85,7 @@ export default function AdminPage() {
   const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [batchForm, setBatchForm] = useState({
     artist: '',
-    albumMode: 'existing', // 'existing' or 'new'
+    albumMode: 'existing',
     album_id: '',
     new_album_name: '',
     new_album_year: new Date().getFullYear()
@@ -137,31 +148,138 @@ export default function AdminPage() {
     setSearchParams({ tab: value });
   };
 
+  // Open edit album dialog
+  const openEditAlbum = async (album) => {
+    setEditAlbum(album);
+    setEditAlbumForm({
+      name: album.name,
+      artist: album.artist,
+      year: album.year,
+      description: album.description || ''
+    });
+    setEditAlbumCoverFile(null);
+    setEditAlbumTab('metadata');
+    setAddMixSearch('');
+    setAddMixResults([]);
+    // Load mixes for this album
+    try {
+      const res = await axios.get(`${API}/mixes?album_id=${album.album_id}`);
+      setEditAlbumMixes(res.data);
+    } catch {
+      setEditAlbumMixes([]);
+    }
+  };
+
+  // Save album metadata
+  const handleSaveAlbum = async () => {
+    if (!editAlbumForm.name || !editAlbumForm.artist || !editAlbumForm.year) {
+      toast.error('Completa todos los campos requeridos');
+      return;
+    }
+    setSavingAlbum(true);
+    try {
+      const formData = new FormData();
+      if (editAlbumCoverFile) formData.append('cover', editAlbumCoverFile);
+      const queryParams = new URLSearchParams({
+        name: editAlbumForm.name,
+        artist: editAlbumForm.artist,
+        year: editAlbumForm.year.toString(),
+        ...(editAlbumForm.description && { description: editAlbumForm.description })
+      });
+      await axios.put(`${API}/albums/${editAlbum.album_id}?${queryParams.toString()}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      toast.success('Álbum actualizado');
+      fetchData();
+    } catch {
+      toast.error('Error al actualizar el álbum');
+    } finally {
+      setSavingAlbum(false);
+    }
+  };
+
+  // Remove mix from album (move to no album — set album_id to empty or another)
+  const handleRemoveMixFromAlbum = async (mix) => {
+    try {
+      // We just remove it visually from this album's list — 
+      // in reality we need another album to move it to, so we just show a warning
+      toast.error('Para quitar un mix del álbum, elimínalo o muévelo a otro álbum desde la pestaña "Mixes"');
+    } catch {
+      toast.error('Error');
+    }
+  };
+
+  // Move mix to this album from search results
+  const handleAddMixToAlbum = async (mix) => {
+    try {
+      const queryParams = new URLSearchParams({ album_id: editAlbum.album_id });
+      await axios.put(`${API}/mixes/${mix.mix_id}?${queryParams.toString()}`, new FormData(), {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      toast.success(`"${mix.name}" movido a este álbum`);
+      // Refresh album mixes
+      const res = await axios.get(`${API}/mixes?album_id=${editAlbum.album_id}`);
+      setEditAlbumMixes(res.data);
+      // Remove from search results
+      setAddMixResults(prev => prev.filter(m => m.mix_id !== mix.mix_id));
+      fetchData();
+    } catch {
+      toast.error('Error al mover el mix');
+    }
+  };
+
+  // Move mix OUT of this album to another album
+  const handleMoveMixToAlbum = async (mix, targetAlbumId) => {
+    try {
+      const queryParams = new URLSearchParams({ album_id: targetAlbumId });
+      await axios.put(`${API}/mixes/${mix.mix_id}?${queryParams.toString()}`, new FormData(), {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      toast.success(`"${mix.name}" movido`);
+      const res = await axios.get(`${API}/mixes?album_id=${editAlbum.album_id}`);
+      setEditAlbumMixes(res.data);
+      fetchData();
+    } catch {
+      toast.error('Error al mover el mix');
+    }
+  };
+
+  // Search mixes to add
+  const handleSearchMixesToAdd = async (query) => {
+    setAddMixSearch(query);
+    if (!query.trim()) { setAddMixResults([]); return; }
+    setSearchingMixes(true);
+    try {
+      const res = await axios.get(`${API}/mixes?search=${encodeURIComponent(query)}`);
+      // Filter out mixes already in this album
+      const currentIds = editAlbumMixes.map(m => m.mix_id);
+      setAddMixResults(res.data.filter(m => !currentIds.includes(m.mix_id)));
+    } catch {
+      setAddMixResults([]);
+    } finally {
+      setSearchingMixes(false);
+    }
+  };
+
   // Album handlers
   const handleCreateAlbum = async () => {
     if (!albumForm.name || !albumForm.artist || !albumForm.year) {
       toast.error('Completa todos los campos requeridos');
       return;
     }
-
     setCreatingAlbum(true);
     try {
       const formData = new FormData();
-      if (albumCoverFile) {
-        formData.append('cover', albumCoverFile);
-      }
-
+      if (albumCoverFile) formData.append('cover', albumCoverFile);
       const queryParams = new URLSearchParams({
         name: albumForm.name,
         artist: albumForm.artist,
         year: albumForm.year.toString(),
         ...(albumForm.description && { description: albumForm.description })
       });
-
       await axios.post(`${API}/albums?${queryParams.toString()}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-
       toast.success('Álbum creado exitosamente');
       setShowAlbumDialog(false);
       setAlbumForm({ name: '', artist: '', year: new Date().getFullYear(), description: '' });
@@ -194,20 +312,15 @@ export default function AdminPage() {
       toast.error('Selecciona un archivo de audio');
       return;
     }
-
     if (!uploadForm.name || !uploadForm.artist || !uploadForm.album_id) {
       toast.error('Completa nombre, artista y álbum');
       return;
     }
-
     setUploading(true);
     try {
       const formData = new FormData();
       formData.append('audio', audioFile);
-      if (coverFile) {
-        formData.append('cover', coverFile);
-      }
-
+      if (coverFile) formData.append('cover', coverFile);
       const queryParams = new URLSearchParams({
         name: uploadForm.name,
         artist: uploadForm.artist,
@@ -217,11 +330,9 @@ export default function AdminPage() {
         ...(uploadForm.genre && { genre: uploadForm.genre }),
         ...(uploadForm.description && { description: uploadForm.description })
       });
-
       await axios.post(`${API}/mixes?${queryParams.toString()}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-
       toast.success('Mix subido exitosamente');
       setShowUploadDialog(false);
       resetUploadForm();
@@ -246,56 +357,37 @@ export default function AdminPage() {
       toast.error('Selecciona al menos un archivo de audio');
       return;
     }
-
     if (!batchForm.artist) {
       toast.error('El artista es requerido');
       return;
     }
-
     if (batchForm.albumMode === 'existing' && !batchForm.album_id) {
       toast.error('Selecciona un álbum existente');
       return;
     }
-
     if (batchForm.albumMode === 'new' && !batchForm.new_album_name) {
       toast.error('Ingresa el nombre del nuevo álbum');
       return;
     }
-
     setBatchUploading(true);
     try {
       const formData = new FormData();
-      
-      // Add all audio files
-      for (const file of batchAudioFiles) {
-        formData.append('audio_files', file);
-      }
-      
-      // Add cover if creating new album
-      if (batchForm.albumMode === 'new' && batchCoverFile) {
-        formData.append('album_cover', batchCoverFile);
-      }
-
+      for (const file of batchAudioFiles) formData.append('audio_files', file);
+      if (batchForm.albumMode === 'new' && batchCoverFile) formData.append('album_cover', batchCoverFile);
       const queryParams = new URLSearchParams({
         artist: batchForm.artist,
         ...(batchForm.albumMode === 'existing' && { album_id: batchForm.album_id }),
-        ...(batchForm.albumMode === 'new' && { 
+        ...(batchForm.albumMode === 'new' && {
           new_album_name: batchForm.new_album_name,
           new_album_year: batchForm.new_album_year.toString()
         })
       });
-
       const response = await axios.post(`${API}/mixes/batch?${queryParams.toString()}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-
       const result = response.data;
       toast.success(`${result.created_mixes} mixes subidos al álbum "${result.album.name}"`);
-      
-      if (result.errors && result.errors.length > 0) {
-        toast.error(`${result.errors.length} archivos fallaron`);
-      }
-
+      if (result.errors && result.errors.length > 0) toast.error(`${result.errors.length} archivos fallaron`);
       setShowBatchDialog(false);
       resetBatchForm();
       fetchData();
@@ -309,13 +401,7 @@ export default function AdminPage() {
   };
 
   const resetBatchForm = () => {
-    setBatchForm({
-      artist: '',
-      albumMode: 'existing',
-      album_id: '',
-      new_album_name: '',
-      new_album_year: new Date().getFullYear()
-    });
+    setBatchForm({ artist: '', albumMode: 'existing', album_id: '', new_album_name: '', new_album_year: new Date().getFullYear() });
     setBatchAudioFiles([]);
     setBatchCoverFile(null);
   };
@@ -338,7 +424,6 @@ export default function AdminPage() {
       toast.error('Completa todos los campos requeridos');
       return;
     }
-
     setCreatingInstructor(true);
     try {
       const payload = {
@@ -376,7 +461,6 @@ export default function AdminPage() {
       toast.error('El nombre es requerido');
       return;
     }
-
     setCreatingStudio(true);
     try {
       await axios.post(`${API}/studios`, studioForm);
@@ -422,50 +506,26 @@ export default function AdminPage() {
   return (
     <Layout>
       <div className="space-y-6" data-testid="admin-page">
-        {/* Header */}
         <div>
           <h1 className="text-3xl font-bold text-white mb-2" style={{ fontFamily: 'Outfit, sans-serif' }}>
             Panel de Administración
           </h1>
-          <p className="text-[#A1A1AA]">
-            Gestiona álbumes, mixes, instructores y estudios
-          </p>
+          <p className="text-[#A1A1AA]">Gestiona álbumes, mixes, instructores y estudios</p>
         </div>
 
-        {/* Tabs */}
         <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           <TabsList className="bg-[#141414] border border-[#27272A] p-1">
-            <TabsTrigger 
-              value="albums" 
-              className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white"
-              data-testid="tab-albums"
-            >
-              <Disc size={18} className="mr-2" />
-              Álbumes ({albums.length})
+            <TabsTrigger value="albums" className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white" data-testid="tab-albums">
+              <Disc size={18} className="mr-2" />Álbumes ({albums.length})
             </TabsTrigger>
-            <TabsTrigger 
-              value="mixes" 
-              className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white"
-              data-testid="tab-mixes"
-            >
-              <MusicNote size={18} className="mr-2" />
-              Mixes ({mixes.length})
+            <TabsTrigger value="mixes" className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white" data-testid="tab-mixes">
+              <MusicNote size={18} className="mr-2" />Mixes ({mixes.length})
             </TabsTrigger>
-            <TabsTrigger 
-              value="instructors" 
-              className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white"
-              data-testid="tab-instructors"
-            >
-              <Users size={18} className="mr-2" />
-              Instructores ({instructors.length})
+            <TabsTrigger value="instructors" className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white" data-testid="tab-instructors">
+              <Users size={18} className="mr-2" />Instructores ({instructors.length})
             </TabsTrigger>
-            <TabsTrigger 
-              value="studios" 
-              className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white"
-              data-testid="tab-studios"
-            >
-              <Storefront size={18} className="mr-2" />
-              Estudios ({studios.length})
+            <TabsTrigger value="studios" className="data-[state=active]:bg-[#007AFF] data-[state=active]:text-white" data-testid="tab-studios">
+              <Storefront size={18} className="mr-2" />Estudios ({studios.length})
             </TabsTrigger>
           </TabsList>
 
@@ -473,16 +533,9 @@ export default function AdminPage() {
           <TabsContent value="albums" className="mt-6">
             <div className="bg-[#141414] border border-[#27272A] rounded-md p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                  Álbumes
-                </h2>
-                <Button
-                  onClick={() => setShowAlbumDialog(true)}
-                  className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold"
-                  data-testid="create-album-btn"
-                >
-                  <Plus size={18} className="mr-2" />
-                  Crear álbum
+                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>Álbumes</h2>
+                <Button onClick={() => setShowAlbumDialog(true)} className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold" data-testid="create-album-btn">
+                  <Plus size={18} className="mr-2" />Crear álbum
                 </Button>
               </div>
 
@@ -490,29 +543,15 @@ export default function AdminPage() {
                 <div className="text-center py-12">
                   <Disc size={48} className="mx-auto text-[#71717A] mb-4" />
                   <p className="text-[#A1A1AA] mb-4">No hay álbumes creados</p>
-                  <p className="text-sm text-[#71717A] mb-4">Crea un álbum primero para poder subir mixes</p>
-                  <Button
-                    onClick={() => setShowAlbumDialog(true)}
-                    className="bg-[#007AFF] hover:bg-[#3395FF]"
-                  >
-                    Crear primer álbum
-                  </Button>
+                  <Button onClick={() => setShowAlbumDialog(true)} className="bg-[#007AFF] hover:bg-[#3395FF]">Crear primer álbum</Button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {albums.map((album) => (
-                    <div
-                      key={album.album_id}
-                      className="bg-[#1F1F1F] border border-[#27272A] rounded-md p-4 hover-card group relative"
-                      data-testid={`album-card-${album.album_id}`}
-                    >
+                    <div key={album.album_id} className="bg-[#1F1F1F] border border-[#27272A] rounded-md p-4 hover-card group relative" data-testid={`album-card-${album.album_id}`}>
                       <div className="w-full aspect-square rounded-md bg-gradient-to-br from-[#007AFF] to-[#005ECA] flex items-center justify-center mb-3 overflow-hidden">
                         {album.cover_path ? (
-                          <img
-                            src={`${API}/albums/${album.album_id}/cover`}
-                            alt={album.name}
-                            className="w-full h-full object-cover"
-                          />
+                          <img src={`${API}/albums/${album.album_id}/cover`} alt={album.name} className="w-full h-full object-cover" />
                         ) : (
                           <Disc size={48} className="text-white" />
                         )}
@@ -525,14 +564,22 @@ export default function AdminPage() {
                         <span>•</span>
                         <span>{album.mix_count} mixes</span>
                       </div>
-
-                      <button
-                        onClick={() => setDeleteAlbum(album)}
-                        className="absolute top-2 right-2 p-2 rounded-md bg-[#27272A] text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/20 opacity-0 group-hover:opacity-100 transition-opacity"
-                        data-testid={`delete-album-btn-${album.album_id}`}
-                      >
-                        <Trash size={16} />
-                      </button>
+                      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => openEditAlbum(album)}
+                          className="p-2 rounded-md bg-[#27272A] text-[#71717A] hover:text-[#007AFF] hover:bg-[#007AFF]/20"
+                          data-testid={`edit-album-btn-${album.album_id}`}
+                        >
+                          <PencilSimple size={16} />
+                        </button>
+                        <button
+                          onClick={() => setDeleteAlbum(album)}
+                          className="p-2 rounded-md bg-[#27272A] text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/20"
+                          data-testid={`delete-album-btn-${album.album_id}`}
+                        >
+                          <Trash size={16} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -544,35 +591,13 @@ export default function AdminPage() {
           <TabsContent value="mixes" className="mt-6">
             <div className="bg-[#141414] border border-[#27272A] rounded-md p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                  Catálogo de Mixes
-                </h2>
+                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>Catálogo de Mixes</h2>
                 <div className="flex gap-3">
-                  <Button
-                    onClick={() => {
-                      setShowBatchDialog(true);
-                    }}
-                    variant="outline"
-                    className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A] font-bold"
-                    data-testid="batch-upload-btn"
-                  >
-                    <Upload size={18} className="mr-2" />
-                    Subir en lote
+                  <Button onClick={() => setShowBatchDialog(true)} variant="outline" className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A] font-bold" data-testid="batch-upload-btn">
+                    <Upload size={18} className="mr-2" />Subir en lote
                   </Button>
-                  <Button
-                    onClick={() => {
-                      if (albums.length === 0) {
-                        toast.error('Debes crear un álbum primero');
-                        setActiveTab('albums');
-                        return;
-                      }
-                      setShowUploadDialog(true);
-                    }}
-                    className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold"
-                    data-testid="upload-mix-btn"
-                  >
-                    <Plus size={18} className="mr-2" />
-                    Subir mix individual
+                  <Button onClick={() => { if (albums.length === 0) { toast.error('Debes crear un álbum primero'); setActiveTab('albums'); return; } setShowUploadDialog(true); }} className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold" data-testid="upload-mix-btn">
+                    <Plus size={18} className="mr-2" />Subir mix individual
                   </Button>
                 </div>
               </div>
@@ -581,25 +606,6 @@ export default function AdminPage() {
                 <div className="text-center py-12">
                   <MusicNote size={48} className="mx-auto text-[#71717A] mb-4" />
                   <p className="text-[#A1A1AA] mb-4">No hay mixes en el catálogo</p>
-                  {albums.length === 0 ? (
-                    <p className="text-sm text-[#71717A]">Crea un álbum primero para poder subir mixes</p>
-                  ) : (
-                    <div className="flex gap-3 justify-center">
-                      <Button
-                        onClick={() => setShowBatchDialog(true)}
-                        variant="outline"
-                        className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
-                      >
-                        Subir en lote
-                      </Button>
-                      <Button
-                        onClick={() => setShowUploadDialog(true)}
-                        className="bg-[#007AFF] hover:bg-[#3395FF]"
-                      >
-                        Subir mix individual
-                      </Button>
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -621,12 +627,8 @@ export default function AdminPage() {
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded bg-[#1F1F1F] flex items-center justify-center flex-shrink-0">
-                                {mix.cover_path ? (
-                                  <img
-                                    src={`${API}/mixes/${mix.mix_id}/cover`}
-                                    alt={mix.name}
-                                    className="w-full h-full object-cover rounded"
-                                  />
+                                {mix.cover_url ? (
+                                  <img src={mix.cover_url} alt={mix.name} className="w-full h-full object-cover rounded" />
                                 ) : (
                                   <MusicNote size={20} className="text-[#71717A]" />
                                 )}
@@ -640,13 +642,7 @@ export default function AdminPage() {
                           <td className="py-3 px-4 text-center text-[#A1A1AA]">{mix.bpm}</td>
                           <td className="py-3 px-4 text-center text-[#A1A1AA]">{formatDuration(mix.duration)}</td>
                           <td className="py-3 px-4 text-right">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => setDeleteMix(mix)}
-                              className="text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/10"
-                              data-testid={`delete-mix-btn-${mix.mix_id}`}
-                            >
+                            <Button size="sm" variant="ghost" onClick={() => setDeleteMix(mix)} className="text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/10" data-testid={`delete-mix-btn-${mix.mix_id}`}>
                               <Trash size={16} />
                             </Button>
                           </td>
@@ -663,29 +659,16 @@ export default function AdminPage() {
           <TabsContent value="instructors" className="mt-6">
             <div className="bg-[#141414] border border-[#27272A] rounded-md p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                  Instructores
-                </h2>
-                <Button
-                  onClick={() => setShowInstructorDialog(true)}
-                  className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold"
-                  data-testid="add-instructor-btn"
-                >
-                  <Plus size={18} className="mr-2" />
-                  Agregar instructor
+                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>Instructores</h2>
+                <Button onClick={() => setShowInstructorDialog(true)} className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold" data-testid="add-instructor-btn">
+                  <Plus size={18} className="mr-2" />Agregar instructor
                 </Button>
               </div>
-
               {instructors.length === 0 ? (
                 <div className="text-center py-12">
                   <Users size={48} className="mx-auto text-[#71717A] mb-4" />
                   <p className="text-[#A1A1AA] mb-4">No hay instructores registrados</p>
-                  <Button
-                    onClick={() => setShowInstructorDialog(true)}
-                    className="bg-[#007AFF] hover:bg-[#3395FF]"
-                  >
-                    Agregar primer instructor
-                  </Button>
+                  <Button onClick={() => setShowInstructorDialog(true)} className="bg-[#007AFF] hover:bg-[#3395FF]">Agregar primer instructor</Button>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -704,20 +687,10 @@ export default function AdminPage() {
                         <tr key={instructor.user_id} className="hover:bg-[#1F1F1F] transition-colors" data-testid={`admin-instructor-${instructor.user_id}`}>
                           <td className="py-3 px-4 font-semibold text-white">{instructor.name}</td>
                           <td className="py-3 px-4 text-[#A1A1AA]">{instructor.email}</td>
-                          <td className="py-3 px-4 text-[#A1A1AA]">
-                            {studios.find(s => s.studio_id === instructor.studio_id)?.name || '-'}
-                          </td>
-                          <td className="py-3 px-4 text-[#A1A1AA]">
-                            {new Date(instructor.created_at).toLocaleDateString()}
-                          </td>
+                          <td className="py-3 px-4 text-[#A1A1AA]">{studios.find(s => s.studio_id === instructor.studio_id)?.name || '-'}</td>
+                          <td className="py-3 px-4 text-[#A1A1AA]">{new Date(instructor.created_at).toLocaleDateString()}</td>
                           <td className="py-3 px-4 text-right">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => setDeleteInstructor(instructor)}
-                              className="text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/10"
-                              data-testid={`delete-instructor-btn-${instructor.user_id}`}
-                            >
+                            <Button size="sm" variant="ghost" onClick={() => setDeleteInstructor(instructor)} className="text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/10" data-testid={`delete-instructor-btn-${instructor.user_id}`}>
                               <Trash size={16} />
                             </Button>
                           </td>
@@ -734,62 +707,33 @@ export default function AdminPage() {
           <TabsContent value="studios" className="mt-6">
             <div className="bg-[#141414] border border-[#27272A] rounded-md p-6">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                  Estudios / Sucursales
-                </h2>
-                <Button
-                  onClick={() => setShowStudioDialog(true)}
-                  className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold"
-                  data-testid="add-studio-btn"
-                >
-                  <Plus size={18} className="mr-2" />
-                  Agregar estudio
+                <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Outfit, sans-serif' }}>Estudios / Sucursales</h2>
+                <Button onClick={() => setShowStudioDialog(true)} className="bg-[#007AFF] hover:bg-[#3395FF] text-white font-bold" data-testid="add-studio-btn">
+                  <Plus size={18} className="mr-2" />Agregar estudio
                 </Button>
               </div>
-
               {studios.length === 0 ? (
                 <div className="text-center py-12">
                   <Storefront size={48} className="mx-auto text-[#71717A] mb-4" />
                   <p className="text-[#A1A1AA] mb-4">No hay estudios registrados</p>
-                  <Button
-                    onClick={() => setShowStudioDialog(true)}
-                    className="bg-[#007AFF] hover:bg-[#3395FF]"
-                  >
-                    Agregar primer estudio
-                  </Button>
+                  <Button onClick={() => setShowStudioDialog(true)} className="bg-[#007AFF] hover:bg-[#3395FF]">Agregar primer estudio</Button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {studios.map((studio) => (
-                    <div
-                      key={studio.studio_id}
-                      className="bg-[#1F1F1F] border border-[#27272A] rounded-md p-4 hover-card group relative"
-                      data-testid={`admin-studio-${studio.studio_id}`}
-                    >
+                    <div key={studio.studio_id} className="bg-[#1F1F1F] border border-[#27272A] rounded-md p-4 hover-card group relative" data-testid={`admin-studio-${studio.studio_id}`}>
                       <div className="flex items-center gap-3 mb-3">
                         <div className="w-12 h-12 rounded-md bg-[#007AFF]/20 flex items-center justify-center">
                           <Storefront size={24} className="text-[#007AFF]" />
                         </div>
                         <div>
                           <h3 className="font-semibold text-white">{studio.name}</h3>
-                          <p className="text-sm text-[#71717A]">
-                            {instructors.filter(i => i.studio_id === studio.studio_id).length} instructores
-                          </p>
+                          <p className="text-sm text-[#71717A]">{instructors.filter(i => i.studio_id === studio.studio_id).length} instructores</p>
                         </div>
                       </div>
-                      
-                      {studio.address && (
-                        <p className="text-sm text-[#A1A1AA] mb-1">{studio.address}</p>
-                      )}
-                      {studio.phone && (
-                        <p className="text-sm text-[#71717A]">{studio.phone}</p>
-                      )}
-
-                      <button
-                        onClick={() => setDeleteStudio(studio)}
-                        className="absolute top-2 right-2 p-2 rounded-md bg-[#27272A] text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/20 opacity-0 group-hover:opacity-100 transition-opacity"
-                        data-testid={`delete-studio-btn-${studio.studio_id}`}
-                      >
+                      {studio.address && <p className="text-sm text-[#A1A1AA] mb-1">{studio.address}</p>}
+                      {studio.phone && <p className="text-sm text-[#71717A]">{studio.phone}</p>}
+                      <button onClick={() => setDeleteStudio(studio)} className="absolute top-2 right-2 p-2 rounded-md bg-[#27272A] text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/20 opacity-0 group-hover:opacity-100 transition-opacity" data-testid={`delete-studio-btn-${studio.studio_id}`}>
                         <Trash size={16} />
                       </button>
                     </div>
@@ -800,94 +744,184 @@ export default function AdminPage() {
           </TabsContent>
         </Tabs>
 
+        {/* EDIT ALBUM DIALOG */}
+        <Dialog open={!!editAlbum} onOpenChange={(open) => { if (!open) setEditAlbum(null); }}>
+          <DialogContent className="bg-[#141414] border-[#27272A] text-white max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>
+                Editar álbum: {editAlbum?.name}
+              </DialogTitle>
+            </DialogHeader>
+
+            {/* Tabs inside dialog */}
+            <div className="flex gap-2 mt-2 border-b border-[#27272A] pb-2">
+              <button
+                onClick={() => setEditAlbumTab('metadata')}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${editAlbumTab === 'metadata' ? 'bg-[#007AFF] text-white' : 'text-[#A1A1AA] hover:text-white'}`}
+              >
+                Metadatos
+              </button>
+              <button
+                onClick={() => setEditAlbumTab('mixes')}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${editAlbumTab === 'mixes' ? 'bg-[#007AFF] text-white' : 'text-[#A1A1AA] hover:text-white'}`}
+              >
+                Mixes ({editAlbumMixes.length})
+              </button>
+              <button
+                onClick={() => setEditAlbumTab('add')}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${editAlbumTab === 'add' ? 'bg-[#007AFF] text-white' : 'text-[#A1A1AA] hover:text-white'}`}
+              >
+                + Agregar mixes
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto mt-3">
+
+              {/* Metadata tab */}
+              {editAlbumTab === 'metadata' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Nombre *</label>
+                    <Input value={editAlbumForm.name} onChange={(e) => setEditAlbumForm({ ...editAlbumForm, name: e.target.value })} className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Artista / DJ *</label>
+                    <Input value={editAlbumForm.artist} onChange={(e) => setEditAlbumForm({ ...editAlbumForm, artist: e.target.value })} className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Año *</label>
+                    <Input type="number" value={editAlbumForm.year} onChange={(e) => setEditAlbumForm({ ...editAlbumForm, year: parseInt(e.target.value) || new Date().getFullYear() })} className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Descripción</label>
+                    <Input value={editAlbumForm.description} onChange={(e) => setEditAlbumForm({ ...editAlbumForm, description: e.target.value })} className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Portada</label>
+                    {editAlbum?.cover_path && (
+                      <img src={`${API}/albums/${editAlbum.album_id}/cover`} alt="" className="w-20 h-20 object-cover rounded mb-2" />
+                    )}
+                    <Input type="file" accept="image/*" onChange={(e) => setEditAlbumCoverFile(e.target.files[0])} className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1" />
+                    {editAlbumCoverFile && <p className="text-sm text-[#34C759] mt-1">{editAlbumCoverFile.name}</p>}
+                  </div>
+                  <Button onClick={handleSaveAlbum} disabled={savingAlbum} className="bg-[#007AFF] hover:bg-[#3395FF] w-full">
+                    {savingAlbum ? 'Guardando...' : 'Guardar cambios'}
+                  </Button>
+                </div>
+              )}
+
+              {/* Mixes in album tab */}
+              {editAlbumTab === 'mixes' && (
+                <div className="space-y-2">
+                  {editAlbumMixes.length === 0 ? (
+                    <p className="text-[#A1A1AA] text-center py-8">No hay mixes en este álbum</p>
+                  ) : (
+                    editAlbumMixes.map((mix) => (
+                      <div key={mix.mix_id} className="flex items-center gap-3 p-3 rounded-lg bg-[#1F1F1F] border border-[#27272A]">
+                        <div className="w-10 h-10 rounded bg-[#27272A] overflow-hidden flex-shrink-0">
+                          {mix.cover_url ? (
+                            <img src={mix.cover_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center"><MusicNote size={14} className="text-[#71717A]" /></div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-white truncate">{mix.name}</p>
+                          <p className="text-xs text-[#A1A1AA]">{mix.artist} {mix.bpm ? `• ${mix.bpm} BPM` : ''} {mix.duration ? `• ${formatDuration(mix.duration)}` : ''}</p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <Select onValueChange={(albumId) => handleMoveMixToAlbum(mix, albumId)}>
+                            <SelectTrigger className="bg-[#27272A] border-0 text-white text-xs h-8 w-36">
+                              <SelectValue placeholder="Mover a..." />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#1F1F1F] border-[#27272A]">
+                              {albums.filter(a => a.album_id !== editAlbum?.album_id).map(a => (
+                                <SelectItem key={a.album_id} value={a.album_id} className="text-white text-xs">{a.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <button onClick={() => setDeleteMix(mix)} className="p-1.5 rounded text-[#71717A] hover:text-[#FF3B30] hover:bg-[#FF3B30]/10">
+                            <Trash size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* Add mixes tab */}
+              {editAlbumTab === 'add' && (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" size={16} />
+                    <Input
+                      placeholder="Buscar mixes del catálogo..."
+                      value={addMixSearch}
+                      onChange={(e) => handleSearchMixesToAdd(e.target.value)}
+                      className="pl-9 bg-[#1F1F1F] border-[#27272A] text-white"
+                    />
+                  </div>
+                  {searchingMixes && <p className="text-center text-[#A1A1AA] text-sm py-4">Buscando...</p>}
+                  {!searchingMixes && addMixSearch && addMixResults.length === 0 && (
+                    <p className="text-center text-[#A1A1AA] text-sm py-4">No se encontraron mixes</p>
+                  )}
+                  {addMixResults.map((mix) => (
+                    <div key={mix.mix_id} className="flex items-center gap-3 p-3 rounded-lg bg-[#1F1F1F] border border-[#27272A]">
+                      <div className="w-10 h-10 rounded bg-[#27272A] overflow-hidden flex-shrink-0">
+                        {mix.cover_url ? (
+                          <img src={mix.cover_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center"><MusicNote size={14} className="text-[#71717A]" /></div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-white truncate">{mix.name}</p>
+                        <p className="text-xs text-[#A1A1AA]">{mix.artist} • {mix.album_name || 'Sin álbum'}</p>
+                      </div>
+                      <button onClick={() => handleAddMixToAlbum(mix)} className="px-3 py-1 rounded-full text-xs font-bold border border-[#007AFF] text-[#007AFF] hover:bg-[#007AFF]/10 flex-shrink-0">
+                        Agregar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {/* Create Album Dialog */}
         <Dialog open={showAlbumDialog} onOpenChange={setShowAlbumDialog}>
           <DialogContent className="bg-[#141414] border-[#27272A] text-white">
             <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>
-                Crear nuevo álbum
-              </DialogTitle>
+              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Crear nuevo álbum</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 mt-4">
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Nombre del álbum *
-                </label>
-                <Input
-                  value={albumForm.name}
-                  onChange={(e) => setAlbumForm({ ...albumForm, name: e.target.value })}
-                  placeholder="Cycling Power Vol. 1"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="album-name-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Nombre del álbum *</label>
+                <Input value={albumForm.name} onChange={(e) => setAlbumForm({ ...albumForm, name: e.target.value })} placeholder="Cycling Power Vol. 1" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="album-name-input" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Artista / DJ *
-                </label>
-                <Input
-                  value={albumForm.artist}
-                  onChange={(e) => setAlbumForm({ ...albumForm, artist: e.target.value })}
-                  placeholder="DJ FitBeats"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="album-artist-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Artista / DJ *</label>
+                <Input value={albumForm.artist} onChange={(e) => setAlbumForm({ ...albumForm, artist: e.target.value })} placeholder="DJ FitBeats" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="album-artist-input" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Año *
-                </label>
-                <Input
-                  type="number"
-                  value={albumForm.year}
-                  onChange={(e) => setAlbumForm({ ...albumForm, year: parseInt(e.target.value) || new Date().getFullYear() })}
-                  placeholder="2024"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="album-year-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Año *</label>
+                <Input type="number" value={albumForm.year} onChange={(e) => setAlbumForm({ ...albumForm, year: parseInt(e.target.value) || new Date().getFullYear() })} placeholder="2024" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="album-year-input" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Descripción
-                </label>
-                <Input
-                  value={albumForm.description}
-                  onChange={(e) => setAlbumForm({ ...albumForm, description: e.target.value })}
-                  placeholder="Descripción opcional..."
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="album-description-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Descripción</label>
+                <Input value={albumForm.description} onChange={(e) => setAlbumForm({ ...albumForm, description: e.target.value })} placeholder="Descripción opcional..." className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="album-description-input" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Imagen de portada
-                </label>
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => setAlbumCoverFile(e.target.files[0])}
-                  className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1"
-                  data-testid="album-cover-input"
-                />
-                {albumCoverFile && (
-                  <p className="text-sm text-[#34C759] mt-1">{albumCoverFile.name}</p>
-                )}
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Imagen de portada</label>
+                <Input type="file" accept="image/*" onChange={(e) => setAlbumCoverFile(e.target.files[0])} className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1" data-testid="album-cover-input" />
+                {albumCoverFile && <p className="text-sm text-[#34C759] mt-1">{albumCoverFile.name}</p>}
               </div>
             </div>
             <DialogFooter className="mt-6">
-              <Button
-                variant="outline"
-                onClick={() => { setShowAlbumDialog(false); setAlbumForm({ name: '', artist: '', year: new Date().getFullYear(), description: '' }); setAlbumCoverFile(null); }}
-                className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleCreateAlbum}
-                disabled={creatingAlbum}
-                className="bg-[#007AFF] hover:bg-[#3395FF]"
-                data-testid="confirm-create-album-btn"
-              >
+              <Button variant="outline" onClick={() => { setShowAlbumDialog(false); setAlbumForm({ name: '', artist: '', year: new Date().getFullYear(), description: '' }); setAlbumCoverFile(null); }} className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</Button>
+              <Button onClick={handleCreateAlbum} disabled={creatingAlbum} className="bg-[#007AFF] hover:bg-[#3395FF]" data-testid="confirm-create-album-btn">
                 {creatingAlbum ? 'Creando...' : 'Crear álbum'}
               </Button>
             </DialogFooter>
@@ -898,152 +932,58 @@ export default function AdminPage() {
         <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
           <DialogContent className="bg-[#141414] border-[#27272A] text-white max-w-lg">
             <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>
-                Subir nuevo mix
-              </DialogTitle>
+              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Subir nuevo mix</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 mt-4 max-h-[60vh] overflow-y-auto pr-2">
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Álbum *
-                  </label>
-                  <Select
-                    value={uploadForm.album_id}
-                    onValueChange={(value) => setUploadForm({ ...uploadForm, album_id: value })}
-                  >
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Álbum *</label>
+                  <Select value={uploadForm.album_id} onValueChange={(value) => setUploadForm({ ...uploadForm, album_id: value })}>
                     <SelectTrigger className="bg-[#1F1F1F] border-[#27272A] text-white" data-testid="mix-album-select">
                       <SelectValue placeholder="Seleccionar álbum" />
                     </SelectTrigger>
                     <SelectContent className="bg-[#1F1F1F] border-[#27272A]">
                       {albums.map((album) => (
-                        <SelectItem key={album.album_id} value={album.album_id} className="text-white">
-                          {album.name} ({album.year})
-                        </SelectItem>
+                        <SelectItem key={album.album_id} value={album.album_id} className="text-white">{album.name} ({album.year})</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Nombre del mix *
-                  </label>
-                  <Input
-                    value={uploadForm.name}
-                    onChange={(e) => setUploadForm({ ...uploadForm, name: e.target.value })}
-                    placeholder="Warm Up Mix"
-                    className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                    data-testid="mix-name-input"
-                  />
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Nombre del mix *</label>
+                  <Input value={uploadForm.name} onChange={(e) => setUploadForm({ ...uploadForm, name: e.target.value })} placeholder="Warm Up Mix" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="mix-name-input" />
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Artista *
-                  </label>
-                  <Input
-                    value={uploadForm.artist}
-                    onChange={(e) => setUploadForm({ ...uploadForm, artist: e.target.value })}
-                    placeholder="Nombre del artista o DJ"
-                    className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                    data-testid="mix-artist-input"
-                  />
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Artista *</label>
+                  <Input value={uploadForm.artist} onChange={(e) => setUploadForm({ ...uploadForm, artist: e.target.value })} placeholder="Nombre del artista o DJ" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="mix-artist-input" />
                 </div>
                 <div>
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    BPM <span className="text-[#71717A] normal-case">(auto-detectado)</span>
-                  </label>
-                  <Input
-                    type="number"
-                    value={uploadForm.bpm}
-                    onChange={(e) => setUploadForm({ ...uploadForm, bpm: e.target.value })}
-                    placeholder="Se detecta del audio"
-                    className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                    data-testid="mix-bpm-input"
-                  />
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">BPM</label>
+                  <Input type="number" value={uploadForm.bpm} onChange={(e) => setUploadForm({ ...uploadForm, bpm: e.target.value })} placeholder="Auto-detectado" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="mix-bpm-input" />
                 </div>
                 <div>
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Duración <span className="text-[#71717A] normal-case">(auto-detectada)</span>
-                  </label>
-                  <Input
-                    type="number"
-                    value={uploadForm.duration}
-                    onChange={(e) => setUploadForm({ ...uploadForm, duration: e.target.value })}
-                    placeholder="Se detecta del audio"
-                    className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                    data-testid="mix-duration-input"
-                  />
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Duración</label>
+                  <Input type="number" value={uploadForm.duration} onChange={(e) => setUploadForm({ ...uploadForm, duration: e.target.value })} placeholder="Auto-detectada" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="mix-duration-input" />
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Género <span className="text-[#71717A] normal-case">(auto-detectado si está en metadatos)</span>
-                  </label>
-                  <Input
-                    value={uploadForm.genre}
-                    onChange={(e) => setUploadForm({ ...uploadForm, genre: e.target.value })}
-                    placeholder="House, EDM, Hip-Hop, etc."
-                    className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                    data-testid="mix-genre-input"
-                  />
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Género</label>
+                  <Input value={uploadForm.genre} onChange={(e) => setUploadForm({ ...uploadForm, genre: e.target.value })} placeholder="House, EDM, Hip-Hop, etc." className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="mix-genre-input" />
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Descripción
-                  </label>
-                  <Input
-                    value={uploadForm.description}
-                    onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
-                    placeholder="Descripción opcional..."
-                    className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                    data-testid="mix-description-input"
-                  />
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Archivo de audio *</label>
+                  <Input type="file" accept="audio/*" onChange={(e) => setAudioFile(e.target.files[0])} className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1" data-testid="mix-audio-input" />
+                  {audioFile && <p className="text-sm text-[#34C759] mt-1">{audioFile.name}</p>}
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Archivo de audio *
-                  </label>
-                  <Input
-                    type="file"
-                    accept="audio/*"
-                    onChange={(e) => setAudioFile(e.target.files[0])}
-                    className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1"
-                    data-testid="mix-audio-input"
-                  />
-                  {audioFile && (
-                    <p className="text-sm text-[#34C759] mt-1">{audioFile.name}</p>
-                  )}
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                    Imagen de portada (opcional, usa la del álbum si no se proporciona)
-                  </label>
-                  <Input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setCoverFile(e.target.files[0])}
-                    className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#1F1F1F] file:text-white file:border file:border-[#27272A] file:rounded file:mr-3 file:px-3 file:py-1"
-                    data-testid="mix-cover-input"
-                  />
-                  {coverFile && (
-                    <p className="text-sm text-[#34C759] mt-1">{coverFile.name}</p>
-                  )}
+                  <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Portada (opcional)</label>
+                  <Input type="file" accept="image/*" onChange={(e) => setCoverFile(e.target.files[0])} className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#1F1F1F] file:text-white file:border file:border-[#27272A] file:rounded file:mr-3 file:px-3 file:py-1" data-testid="mix-cover-input" />
+                  {coverFile && <p className="text-sm text-[#34C759] mt-1">{coverFile.name}</p>}
                 </div>
               </div>
             </div>
             <DialogFooter className="mt-6">
-              <Button
-                variant="outline"
-                onClick={() => { setShowUploadDialog(false); resetUploadForm(); }}
-                className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleUploadMix}
-                disabled={uploading}
-                className="bg-[#007AFF] hover:bg-[#3395FF]"
-                data-testid="confirm-upload-mix-btn"
-              >
+              <Button variant="outline" onClick={() => { setShowUploadDialog(false); resetUploadForm(); }} className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</Button>
+              <Button onClick={handleUploadMix} disabled={uploading} className="bg-[#007AFF] hover:bg-[#3395FF]" data-testid="confirm-upload-mix-btn">
                 {uploading ? 'Subiendo...' : 'Subir mix'}
               </Button>
             </DialogFooter>
@@ -1054,116 +994,52 @@ export default function AdminPage() {
         <Dialog open={showBatchDialog} onOpenChange={setShowBatchDialog}>
           <DialogContent className="bg-[#141414] border-[#27272A] text-white max-w-lg">
             <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>
-                Subir mixes en lote
-              </DialogTitle>
+              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Subir mixes en lote</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 mt-4 max-h-[60vh] overflow-y-auto pr-2">
-              <p className="text-sm text-[#A1A1AA]">
-                Sube múltiples archivos de audio. El nombre del mix se tomará del nombre del archivo.
-                BPM, duración y género se detectan automáticamente.
-              </p>
-
+              <p className="text-sm text-[#A1A1AA]">Sube múltiples archivos de audio. El nombre del mix se tomará del nombre del archivo.</p>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Artista / DJ *
-                </label>
-                <Input
-                  value={batchForm.artist}
-                  onChange={(e) => setBatchForm({ ...batchForm, artist: e.target.value })}
-                  placeholder="Nombre del artista o DJ"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="batch-artist-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Artista / DJ *</label>
+                <Input value={batchForm.artist} onChange={(e) => setBatchForm({ ...batchForm, artist: e.target.value })} placeholder="Nombre del artista o DJ" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="batch-artist-input" />
               </div>
-
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Álbum
-                </label>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Álbum</label>
                 <div className="flex gap-4 mb-3">
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={batchForm.albumMode === 'existing'}
-                      onChange={() => setBatchForm({ ...batchForm, albumMode: 'existing' })}
-                      className="accent-[#007AFF]"
-                    />
+                    <input type="radio" checked={batchForm.albumMode === 'existing'} onChange={() => setBatchForm({ ...batchForm, albumMode: 'existing' })} className="accent-[#007AFF]" />
                     <span className="text-sm">Álbum existente</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      checked={batchForm.albumMode === 'new'}
-                      onChange={() => setBatchForm({ ...batchForm, albumMode: 'new' })}
-                      className="accent-[#007AFF]"
-                    />
+                    <input type="radio" checked={batchForm.albumMode === 'new'} onChange={() => setBatchForm({ ...batchForm, albumMode: 'new' })} className="accent-[#007AFF]" />
                     <span className="text-sm">Crear nuevo álbum</span>
                   </label>
                 </div>
-
                 {batchForm.albumMode === 'existing' ? (
-                  <Select
-                    value={batchForm.album_id}
-                    onValueChange={(value) => setBatchForm({ ...batchForm, album_id: value })}
-                  >
+                  <Select value={batchForm.album_id} onValueChange={(value) => setBatchForm({ ...batchForm, album_id: value })}>
                     <SelectTrigger className="bg-[#1F1F1F] border-[#27272A] text-white" data-testid="batch-album-select">
                       <SelectValue placeholder="Seleccionar álbum" />
                     </SelectTrigger>
                     <SelectContent className="bg-[#1F1F1F] border-[#27272A]">
                       {albums.map((album) => (
-                        <SelectItem key={album.album_id} value={album.album_id} className="text-white">
-                          {album.name} ({album.year})
-                        </SelectItem>
+                        <SelectItem key={album.album_id} value={album.album_id} className="text-white">{album.name} ({album.year})</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 ) : (
                   <div className="space-y-3">
-                    <Input
-                      value={batchForm.new_album_name}
-                      onChange={(e) => setBatchForm({ ...batchForm, new_album_name: e.target.value })}
-                      placeholder="Nombre del nuevo álbum"
-                      className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                      data-testid="batch-new-album-name"
-                    />
-                    <Input
-                      type="number"
-                      value={batchForm.new_album_year}
-                      onChange={(e) => setBatchForm({ ...batchForm, new_album_year: parseInt(e.target.value) || new Date().getFullYear() })}
-                      placeholder="Año"
-                      className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                      data-testid="batch-new-album-year"
-                    />
+                    <Input value={batchForm.new_album_name} onChange={(e) => setBatchForm({ ...batchForm, new_album_name: e.target.value })} placeholder="Nombre del nuevo álbum" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="batch-new-album-name" />
+                    <Input type="number" value={batchForm.new_album_year} onChange={(e) => setBatchForm({ ...batchForm, new_album_year: parseInt(e.target.value) || new Date().getFullYear() })} placeholder="Año" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="batch-new-album-year" />
                     <div>
                       <label className="text-xs text-[#71717A] mb-1 block">Portada del álbum</label>
-                      <Input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => setBatchCoverFile(e.target.files[0])}
-                        className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1"
-                        data-testid="batch-album-cover"
-                      />
-                      {batchCoverFile && (
-                        <p className="text-sm text-[#34C759] mt-1">{batchCoverFile.name}</p>
-                      )}
+                      <Input type="file" accept="image/*" onChange={(e) => setBatchCoverFile(e.target.files[0])} className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1" data-testid="batch-album-cover" />
+                      {batchCoverFile && <p className="text-sm text-[#34C759] mt-1">{batchCoverFile.name}</p>}
                     </div>
                   </div>
                 )}
               </div>
-
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Archivos de audio *
-                </label>
-                <Input
-                  type="file"
-                  accept="audio/*"
-                  multiple
-                  onChange={(e) => setBatchAudioFiles(Array.from(e.target.files))}
-                  className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1"
-                  data-testid="batch-audio-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Archivos de audio *</label>
+                <Input type="file" accept="audio/*" multiple onChange={(e) => setBatchAudioFiles(Array.from(e.target.files))} className="bg-[#1F1F1F] border-[#27272A] text-white file:bg-[#007AFF] file:text-white file:border-0 file:rounded file:mr-3 file:px-3 file:py-1" data-testid="batch-audio-input" />
                 {batchAudioFiles.length > 0 && (
                   <div className="mt-2 space-y-1">
                     <p className="text-sm text-[#34C759]">{batchAudioFiles.length} archivos seleccionados:</p>
@@ -1177,19 +1053,8 @@ export default function AdminPage() {
               </div>
             </div>
             <DialogFooter className="mt-6">
-              <Button
-                variant="outline"
-                onClick={() => { setShowBatchDialog(false); resetBatchForm(); }}
-                className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleBatchUpload}
-                disabled={batchUploading}
-                className="bg-[#007AFF] hover:bg-[#3395FF]"
-                data-testid="confirm-batch-upload-btn"
-              >
+              <Button variant="outline" onClick={() => { setShowBatchDialog(false); resetBatchForm(); }} className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</Button>
+              <Button onClick={handleBatchUpload} disabled={batchUploading} className="bg-[#007AFF] hover:bg-[#3395FF]" data-testid="confirm-batch-upload-btn">
                 {batchUploading ? `Subiendo ${batchAudioFiles.length} mixes...` : `Subir ${batchAudioFiles.length} mixes`}
               </Button>
             </DialogFooter>
@@ -1200,94 +1065,44 @@ export default function AdminPage() {
         <Dialog open={showInstructorDialog} onOpenChange={setShowInstructorDialog}>
           <DialogContent className="bg-[#141414] border-[#27272A] text-white">
             <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>
-                Agregar instructor
-              </DialogTitle>
+              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Agregar instructor</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 mt-4">
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Nombre *
-                </label>
-                <Input
-                  value={instructorForm.name}
-                  onChange={(e) => setInstructorForm({ ...instructorForm, name: e.target.value })}
-                  placeholder="Nombre completo"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="instructor-name-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Nombre *</label>
+                <Input value={instructorForm.name} onChange={(e) => setInstructorForm({ ...instructorForm, name: e.target.value })} placeholder="Nombre completo" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="instructor-name-input" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Email *
-                </label>
-                <Input
-                  type="email"
-                  value={instructorForm.email}
-                  onChange={(e) => setInstructorForm({ ...instructorForm, email: e.target.value })}
-                  placeholder="instructor@email.com"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="instructor-email-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Email *</label>
+                <Input type="email" value={instructorForm.email} onChange={(e) => setInstructorForm({ ...instructorForm, email: e.target.value })} placeholder="instructor@email.com" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="instructor-email-input" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Contraseña *
-                </label>
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Contraseña *</label>
                 <div className="relative">
-                  <Input
-                    type={showPassword ? 'text' : 'password'}
-                    value={instructorForm.password}
-                    onChange={(e) => setInstructorForm({ ...instructorForm, password: e.target.value })}
-                    placeholder="••••••••"
-                    className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white pr-10"
-                    data-testid="instructor-password-input"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#71717A] hover:text-white"
-                  >
+                  <Input type={showPassword ? 'text' : 'password'} value={instructorForm.password} onChange={(e) => setInstructorForm({ ...instructorForm, password: e.target.value })} placeholder="••••••••" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white pr-10" data-testid="instructor-password-input" />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#71717A] hover:text-white">
                     {showPassword ? <EyeSlash size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Estudio (opcional)
-                </label>
-                <Select
-                  value={instructorForm.studio_id}
-                  onValueChange={(value) => setInstructorForm({ ...instructorForm, studio_id: value })}
-                >
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Estudio (opcional)</label>
+                <Select value={instructorForm.studio_id} onValueChange={(value) => setInstructorForm({ ...instructorForm, studio_id: value })}>
                   <SelectTrigger className="bg-[#1F1F1F] border-[#27272A] text-white" data-testid="instructor-studio-select">
                     <SelectValue placeholder="Seleccionar estudio" />
                   </SelectTrigger>
                   <SelectContent className="bg-[#1F1F1F] border-[#27272A]">
                     <SelectItem value="none" className="text-white">Sin estudio</SelectItem>
                     {studios.map((studio) => (
-                      <SelectItem key={studio.studio_id} value={studio.studio_id} className="text-white">
-                        {studio.name}
-                      </SelectItem>
+                      <SelectItem key={studio.studio_id} value={studio.studio_id} className="text-white">{studio.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <DialogFooter className="mt-6">
-              <Button
-                variant="outline"
-                onClick={() => setShowInstructorDialog(false)}
-                className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleCreateInstructor}
-                disabled={creatingInstructor}
-                className="bg-[#007AFF] hover:bg-[#3395FF]"
-                data-testid="confirm-add-instructor-btn"
-              >
+              <Button variant="outline" onClick={() => setShowInstructorDialog(false)} className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</Button>
+              <Button onClick={handleCreateInstructor} disabled={creatingInstructor} className="bg-[#007AFF] hover:bg-[#3395FF]" data-testid="confirm-add-instructor-btn">
                 {creatingInstructor ? 'Creando...' : 'Agregar instructor'}
               </Button>
             </DialogFooter>
@@ -1298,62 +1113,25 @@ export default function AdminPage() {
         <Dialog open={showStudioDialog} onOpenChange={setShowStudioDialog}>
           <DialogContent className="bg-[#141414] border-[#27272A] text-white">
             <DialogHeader>
-              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>
-                Agregar estudio
-              </DialogTitle>
+              <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Agregar estudio</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 mt-4">
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Nombre *
-                </label>
-                <Input
-                  value={studioForm.name}
-                  onChange={(e) => setStudioForm({ ...studioForm, name: e.target.value })}
-                  placeholder="Nombre del estudio"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="studio-name-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Nombre *</label>
+                <Input value={studioForm.name} onChange={(e) => setStudioForm({ ...studioForm, name: e.target.value })} placeholder="Nombre del estudio" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="studio-name-input" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Dirección
-                </label>
-                <Input
-                  value={studioForm.address}
-                  onChange={(e) => setStudioForm({ ...studioForm, address: e.target.value })}
-                  placeholder="Dirección del estudio"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="studio-address-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Dirección</label>
+                <Input value={studioForm.address} onChange={(e) => setStudioForm({ ...studioForm, address: e.target.value })} placeholder="Dirección del estudio" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="studio-address-input" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">
-                  Teléfono
-                </label>
-                <Input
-                  value={studioForm.phone}
-                  onChange={(e) => setStudioForm({ ...studioForm, phone: e.target.value })}
-                  placeholder="+1 234 567 8900"
-                  className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white"
-                  data-testid="studio-phone-input"
-                />
+                <label className="text-xs uppercase tracking-[0.2em] font-bold text-[#A1A1AA] mb-2 block">Teléfono</label>
+                <Input value={studioForm.phone} onChange={(e) => setStudioForm({ ...studioForm, phone: e.target.value })} placeholder="+1 234 567 8900" className="bg-[#1F1F1F] border-[#27272A] focus:border-[#007AFF] text-white" data-testid="studio-phone-input" />
               </div>
             </div>
             <DialogFooter className="mt-6">
-              <Button
-                variant="outline"
-                onClick={() => setShowStudioDialog(false)}
-                className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]"
-              >
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleCreateStudio}
-                disabled={creatingStudio}
-                className="bg-[#007AFF] hover:bg-[#3395FF]"
-                data-testid="confirm-add-studio-btn"
-              >
+              <Button variant="outline" onClick={() => setShowStudioDialog(false)} className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</Button>
+              <Button onClick={handleCreateStudio} disabled={creatingStudio} className="bg-[#007AFF] hover:bg-[#3395FF]" data-testid="confirm-add-studio-btn">
                 {creatingStudio ? 'Creando...' : 'Agregar estudio'}
               </Button>
             </DialogFooter>
@@ -1365,17 +1143,11 @@ export default function AdminPage() {
           <AlertDialogContent className="bg-[#141414] border-[#27272A]">
             <AlertDialogHeader>
               <AlertDialogTitle className="text-white">¿Eliminar álbum?</AlertDialogTitle>
-              <AlertDialogDescription className="text-[#A1A1AA]">
-                Esta acción desactivará el álbum "{deleteAlbum?.name}". Solo se puede eliminar si no tiene mixes.
-              </AlertDialogDescription>
+              <AlertDialogDescription className="text-[#A1A1AA]">Esta acción desactivará el álbum "{deleteAlbum?.name}". Solo se puede eliminar si no tiene mixes.</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">
-                Cancelar
-              </AlertDialogCancel>
-              <AlertDialogAction onClick={handleDeleteAlbum} className="bg-[#FF3B30] hover:bg-[#FF6159]">
-                Eliminar
-              </AlertDialogAction>
+              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteAlbum} className="bg-[#FF3B30] hover:bg-[#FF6159]">Eliminar</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -1385,17 +1157,11 @@ export default function AdminPage() {
           <AlertDialogContent className="bg-[#141414] border-[#27272A]">
             <AlertDialogHeader>
               <AlertDialogTitle className="text-white">¿Eliminar mix?</AlertDialogTitle>
-              <AlertDialogDescription className="text-[#A1A1AA]">
-                Esta acción desactivará el mix "{deleteMix?.name}" del catálogo.
-              </AlertDialogDescription>
+              <AlertDialogDescription className="text-[#A1A1AA]">Esta acción desactivará el mix "{deleteMix?.name}" del catálogo.</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">
-                Cancelar
-              </AlertDialogCancel>
-              <AlertDialogAction onClick={handleDeleteMix} className="bg-[#FF3B30] hover:bg-[#FF6159]">
-                Eliminar
-              </AlertDialogAction>
+              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteMix} className="bg-[#FF3B30] hover:bg-[#FF6159]">Eliminar</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -1405,17 +1171,11 @@ export default function AdminPage() {
           <AlertDialogContent className="bg-[#141414] border-[#27272A]">
             <AlertDialogHeader>
               <AlertDialogTitle className="text-white">¿Eliminar instructor?</AlertDialogTitle>
-              <AlertDialogDescription className="text-[#A1A1AA]">
-                Se eliminará permanentemente la cuenta de "{deleteInstructor?.name}".
-              </AlertDialogDescription>
+              <AlertDialogDescription className="text-[#A1A1AA]">Se eliminará permanentemente la cuenta de "{deleteInstructor?.name}".</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">
-                Cancelar
-              </AlertDialogCancel>
-              <AlertDialogAction onClick={handleDeleteInstructor} className="bg-[#FF3B30] hover:bg-[#FF6159]">
-                Eliminar
-              </AlertDialogAction>
+              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteInstructor} className="bg-[#FF3B30] hover:bg-[#FF6159]">Eliminar</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -1425,17 +1185,11 @@ export default function AdminPage() {
           <AlertDialogContent className="bg-[#141414] border-[#27272A]">
             <AlertDialogHeader>
               <AlertDialogTitle className="text-white">¿Desactivar estudio?</AlertDialogTitle>
-              <AlertDialogDescription className="text-[#A1A1AA]">
-                Se desactivará el estudio "{deleteStudio?.name}". Los instructores asignados no se verán afectados.
-              </AlertDialogDescription>
+              <AlertDialogDescription className="text-[#A1A1AA]">Se desactivará el estudio "{deleteStudio?.name}".</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">
-                Cancelar
-              </AlertDialogCancel>
-              <AlertDialogAction onClick={handleDeleteStudio} className="bg-[#FF3B30] hover:bg-[#FF6159]">
-                Desactivar
-              </AlertDialogAction>
+              <AlertDialogCancel className="bg-[#1F1F1F] border-[#27272A] text-white hover:bg-[#27272A]">Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteStudio} className="bg-[#FF3B30] hover:bg-[#FF6159]">Desactivar</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
