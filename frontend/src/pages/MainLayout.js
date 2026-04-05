@@ -243,6 +243,15 @@ export default function MainLayout() {
     }
   }, [isPlaying, spotifyPlaying]);
 
+  // Auto-advance when Spotify track ends
+  useEffect(() => {
+    if (!isSpotifyTrack || !spotifyPlaying) return;
+    if (spotify?.spotifyIsPlaying === false && (spotify?.spotifyPosition || 0) < 1000) {
+      setSpotifyPlaying(false);
+      playNext();
+    }
+  }, [spotify?.spotifyIsPlaying, spotify?.spotifyPosition]);
+
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = isMuted ? 0 : volume;
