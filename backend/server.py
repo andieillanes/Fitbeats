@@ -762,6 +762,37 @@ async def get_mix(mix_id: str, request: Request):
     mix["audio_url"] = get_public_url(mix["audio_path"]) if mix.get("audio_path") else None
     return MixResponse(**mix)
 
+@api_router.put("/mixes/{mix_id}")
+async def update_mix(mix_id: str, request: Request, name: Optional[str] = Query(None), artist: Optional[str] = Query(None), album_id: Optional[str] = Query(None), bpm: Optional[int] = Query(None), genre: Optional[str] = Query(None), description: Optional[str] = Query(None), cover: Optional[UploadFile] = File(None)):
+    await require_admin(request)
+    mix = await db.mixes.find_one({"mix_id": mix_id, "is_active": True})
+    if not mix:
+        raise HTTPException(status_code=404, detail="Mix not found")
+    update_data = {}
+    if name is not None: update_data["name"] = name
+    if artist is not None: update_data["artist"] = artist
+    if bpm is not None: update_data["bpm"] = bpm
+    if genre is not None: update_data["genre"] = genre
+    if description is not None: update_data["description"] = description
+    if album_id is not None:
+        album = await db.albums.find_one({"album_id": album_id, "is_active": True})
+        if not album:
+            raise HTTPException(status_code=400, detail="Album not found")
+        update_data["album_id"] = album_id
+    if cover and cover.filename:
+        try:
+            cover_content = await cover.read()
+            if cover_content:
+                cover_ext = cover.filename.split(".")[-1] if "." in cover.filename else "jpg"
+                cover_path = f"{APP_NAME}/mixes/{mix_id}/cover.{cover_ext}"
+                put_object(cover_path, cover_content, cover.content_type or "image/jpeg")
+                update_data["cover_path"] = cover_path
+        except Exception as e:
+            logger.warning(f"Could not upload cover: {e}")
+    if update_data:
+        await db.mixes.update_one({"mix_id": mix_id}, {"$set": update_data})
+    return {"message": "Mix updated"}
+
 @api_router.delete("/mixes/{mix_id}")
 async def delete_mix(mix_id: str, request: Request):
     await require_admin(request)
